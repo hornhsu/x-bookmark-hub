@@ -283,25 +283,75 @@ async function unbookmarkInStatusPage(tweetId) {
   const menuRemoveRe = /remove\s*(from\s*)?bookmark|移除書籤|從書籤中?移除|取消書籤|取消收藏|从书签中?移除|ブックマークから削除/i;
   const deletedRe = /this page doesn.?t exist|this post was deleted|this account doesn.?t exist|unable to view this post|此頁面不存在|此貼文已遭刪除|無法查看此貼文/i;
 
-  function findReactProps(el) {
-    let cur = el;
-    for (let depth = 0; cur && depth < 3; depth++, cur = cur.parentElement) {
-      const propKey = Object.keys(cur).find((k) => k.startsWith("__reactProps$"));
-      if (propKey && cur[propKey] && (typeof cur[propKey].onClick === "function" || typeof cur[propKey].onPress === "function")) {
-        return { el: cur, props: cur[propKey] };
+  function inspectElementProps(el) {
+    const candidates = [el, ...el.querySelectorAll("*"), el.parentElement, el.parentElement?.parentElement].filter(Boolean);
+    const ownKeys = [];
+    const reactFnNames = [];
+    let reactEntry = null;
+    for (const node of candidates) {
+      for (const k of Object.keys(node)) {
+        if (!ownKeys.includes(k)) ownKeys.push(k);
+        if (k.startsWith("__reactProps$") && node[k] && typeof node[k] === "object") {
+          const fnKeys = Object.keys(node[k]).filter((pk) => typeof node[k][pk] === "function");
+          for (const fk of fnKeys) {
+            if (!reactFnNames.includes(fk)) reactFnNames.push(fk);
+          }
+          if (!reactEntry && fnKeys.length > 0) {
+            reactEntry = { el: node, props: node[k], fnKeys };
+          }
+        }
       }
     }
-    return null;
+    return { ownKeys: ownKeys.slice(0, 6), reactFnNames: reactFnNames.slice(0, 8), reactEntry };
   }
 
-  function triggerClick(el) {
+  async function triggerClick(el) {
     el.scrollIntoView({ block: "center" });
-    const evOpts = { bubbles: true, cancelable: true, composed: true, button: 0, buttons: 1 };
-    try { el.dispatchEvent(new PointerEvent("pointerdown", evOpts)); } catch (_) {}
-    try { el.dispatchEvent(new MouseEvent("mousedown", evOpts)); } catch (_) {}
-    try { el.dispatchEvent(new PointerEvent("pointerup", evOpts)); } catch (_) {}
-    try { el.dispatchEvent(new MouseEvent("mouseup", evOpts)); } catch (_) {}
-    el.click();
+    const rect = el.getBoundingClientRect();
+    const cx = Math.round(rect.left + Math.max(4, rect.width / 2));
+    const cy = Math.round(rect.top + Math.max(4, rect.height / 2));
+    const fromPt = document.elementFromPoint(cx, cy);
+    const hitEl = fromPt && el.contains(fromPt) ? fromPt : el;
+
+    const downMouse = {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      view: window,
+      detail: 1,
+      clientX: cx,
+      clientY: cy,
+      screenX: cx,
+      screenY: cy,
+      button: 0,
+      buttons: 1,
+    };
+    const upMouse = Object.assign({}, downMouse, { buttons: 0 });
+    const downPtr = Object.assign({}, downMouse, {
+      pointerId: 1,
+      pointerType: "mouse",
+      isPrimary: true,
+      width: 1,
+      height: 1,
+      pressure: 0.5,
+    });
+    const upPtr = Object.assign({}, upMouse, {
+      pointerId: 1,
+      pointerType: "mouse",
+      isPrimary: true,
+      width: 1,
+      height: 1,
+      pressure: 0,
+    });
+
+    try { hitEl.dispatchEvent(new PointerEvent("pointerover", downPtr)); } catch (_) {}
+    try { hitEl.dispatchEvent(new MouseEvent("mouseover", downMouse)); } catch (_) {}
+    try { hitEl.dispatchEvent(new PointerEvent("pointerdown", downPtr)); } catch (_) {}
+    try { hitEl.dispatchEvent(new MouseEvent("mousedown", downMouse)); } catch (_) {}
+    await sleep(45);
+    try { hitEl.dispatchEvent(new PointerEvent("pointerup", upPtr)); } catch (_) {}
+    try { hitEl.dispatchEvent(new MouseEvent("mouseup", upMouse)); } catch (_) {}
+    try { hitEl.dispatchEvent(new MouseEvent("click", upMouse)); } catch (_) { el.click(); }
   }
 
   function findFocalContainer() {
@@ -375,7 +425,7 @@ async function unbookmarkInStatusPage(tweetId) {
         const beforeLabel = (targetBtn.getAttribute("aria-label") || "").trim();
         const beforePressed = targetBtn.getAttribute("aria-pressed") || "";
         const resStart = performance.getEntriesByType("resource").length;
-        triggerClick(targetBtn);
+        await triggerClick(targetBtn);
 
         const clickStart = Date.now();
         const confirmDeadline = clickStart + 8000;
@@ -396,7 +446,7 @@ async function unbookmarkInStatusPage(tweetId) {
             for (const item of document.querySelectorAll('[role="menuitem"], [role="menu"] button')) {
               const itemTxt = (item.innerText || item.getAttribute("aria-label") || "").trim();
               if (itemTxt && menuRemoveRe.test(itemTxt)) {
-                triggerClick(item);
+                await triggerClick(item);
                 clickedMenu = true;
                 break;
               }
@@ -418,25 +468,44 @@ async function unbookmarkInStatusPage(tweetId) {
           if (!retriedClick && !clickedMenu && Date.now() - clickStart >= 2000) {
             retriedClick = true;
             const btnNow = stillRemove || targetBtn;
-            const rp = findReactProps(btnNow);
+            const info = inspectElementProps(btnNow);
+            const rp = info.reactEntry;
+            const synthEv = {
+              isPrimary: true,
+              pointerId: 1,
+              pointerType: "mouse",
+              button: 0,
+              buttons: 0,
+              preventDefault() {},
+              stopPropagation() {},
+              persist() {},
+              currentTarget: rp ? rp.el : btnNow,
+              target: btnNow,
+              nativeEvent: new PointerEvent("pointerup", { bubbles: true, isPrimary: true, pointerId: 1, pointerType: "mouse" }),
+            };
+            let invoked = false;
             if (rp) {
               try {
                 if (typeof rp.props.onClick === "function") {
-                  rp.props.onClick({
-                    preventDefault() {},
-                    stopPropagation() {},
-                    currentTarget: rp.el,
-                    target: btnNow,
-                    nativeEvent: new MouseEvent("click", { bubbles: true }),
-                  });
+                  rp.props.onClick(synthEv);
+                  invoked = true;
                 } else if (typeof rp.props.onPress === "function") {
-                  rp.props.onPress({ preventDefault() {}, stopPropagation() {}, currentTarget: rp.el, target: btnNow });
+                  rp.props.onPress(synthEv);
+                  invoked = true;
+                } else if (typeof rp.props.onPointerUp === "function") {
+                  if (typeof rp.props.onPointerDown === "function") rp.props.onPointerDown(synthEv);
+                  rp.props.onPointerUp(synthEv);
+                  invoked = true;
                 }
-              } catch (_) {
-                triggerClick(btnNow);
-              }
-            } else {
-              triggerClick(btnNow);
+              } catch (_) {}
+            }
+            if (!invoked) {
+              try {
+                btnNow.focus();
+                btnNow.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, bubbles: true, cancelable: true }));
+                btnNow.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", code: "Enter", keyCode: 13, bubbles: true, cancelable: true }));
+              } catch (_) {}
+              await triggerClick(btnNow);
             }
           }
           await sleep(250);
@@ -444,18 +513,17 @@ async function unbookmarkInStatusPage(tweetId) {
         const liveAfter = (curFocal && curFocal.isConnected) ? curFocal : (findFocalContainer() || document);
         const afterBtn = findButton(liveAfter, "removeBookmark", removeRe) || findButton(liveAfter, "bookmark", addRe, removeRe);
         const afterLabel = afterBtn ? (afterBtn.getAttribute("aria-label") || "").trim() : "";
-        const disabled = Boolean(targetBtn.disabled || targetBtn.getAttribute("aria-disabled") === "true");
-        const hasOnClick = Boolean(findReactProps(targetBtn));
+        const propInfo = inspectElementProps(targetBtn);
         const netHits = performance
           .getEntriesByType("resource")
           .slice(resStart)
           .map((e) => e.name)
-          .filter((n) => /bookmark|graphql/i.test(n))
+          .filter((n) => /bookmark|graphql|api/i.test(n))
           .map((n) => n.split("?")[0].split("/").slice(-1)[0])
           .slice(0, 4);
         return {
           status: "failed",
-          reason: `點擊後未確認狀態切換 (before=${beforeLabel.slice(0, 35)}, after=${afterLabel.slice(0, 35)}, dis=${disabled}, prop=${hasOnClick}, net=${netHits.join(",") || "none"})`,
+          reason: `點擊後未確認狀態切換 (vis=${document.visibilityState}, keys=${propInfo.ownKeys.join(",") || "none"}, fns=${propInfo.reactFnNames.join(",") || "none"}, net=${netHits.join(",") || "none"}, after=${afterLabel.slice(0, 28)})`,
         };
       }
       const addBtn = findButton(focal, "bookmark", addRe, removeRe);
