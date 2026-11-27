@@ -280,7 +280,18 @@ async function unbookmarkInStatusPage(tweetId) {
   const rateRe = /rate limit exceeded|too many requests|something went wrong\.?\s*try reloading/i;
   const toastErrRe = /rate limit|too many|something went wrong|try again|稍後再試|發生錯誤/i;
   const toastOkRe = /removed from your bookmarks|已從你的?書籤中?移除|已从你的?书签中?移除|ブックマークから削除/i;
+  const menuRemoveRe = /remove\s*(from\s*)?bookmark|移除書籤|從書籤中?移除|取消書籤|取消收藏|从书签中?移除|ブックマークから削除/i;
   const deletedRe = /this page doesn.?t exist|this post was deleted|this account doesn.?t exist|unable to view this post|此頁面不存在|此貼文已遭刪除|無法查看此貼文/i;
+
+  function triggerClick(el) {
+    el.scrollIntoView({ block: "center" });
+    const evOpts = { bubbles: true, cancelable: true, composed: true, button: 0, buttons: 1 };
+    try { el.dispatchEvent(new PointerEvent("pointerdown", evOpts)); } catch (_) {}
+    try { el.dispatchEvent(new MouseEvent("mousedown", evOpts)); } catch (_) {}
+    try { el.dispatchEvent(new PointerEvent("pointerup", evOpts)); } catch (_) {}
+    try { el.dispatchEvent(new MouseEvent("mouseup", evOpts)); } catch (_) {}
+    el.click();
+  }
 
   function findFocalContainer() {
     const articles = [...document.querySelectorAll("article")];
@@ -350,14 +361,15 @@ async function unbookmarkInStatusPage(tweetId) {
           await sleep(300);
           continue;
         }
-        const clickedTestId = targetBtn.getAttribute("data-testid") || "";
-        const clickedLabel = (targetBtn.getAttribute("aria-label") || "").slice(0, 60);
-        targetBtn.scrollIntoView({ block: "center" });
-        targetBtn.click();
+        const beforeLabel = (targetBtn.getAttribute("aria-label") || "").trim();
+        const clickedTag = targetBtn.tagName;
+        const beforePressed = targetBtn.getAttribute("aria-pressed") || "";
+        triggerClick(targetBtn);
 
         const clickStart = Date.now();
         const confirmDeadline = clickStart + 8000;
         let retriedClick = false;
+        let clickedMenu = false;
         while (Date.now() < confirmDeadline) {
           const toastEl = document.querySelector('[data-testid="toast"]');
           if (toastEl) {
@@ -369,21 +381,42 @@ async function unbookmarkInStatusPage(tweetId) {
               return { status: "succeeded", reason: "removed_toast" };
             }
           }
+          if (!clickedMenu) {
+            for (const item of document.querySelectorAll('[role="menuitem"], [role="menu"] button')) {
+              const itemTxt = (item.innerText || item.getAttribute("aria-label") || "").trim();
+              if (itemTxt && menuRemoveRe.test(itemTxt)) {
+                triggerClick(item);
+                clickedMenu = true;
+                break;
+              }
+            }
+          }
+          if (targetBtn.isConnected) {
+            const curLabel = (targetBtn.getAttribute("aria-label") || "").trim();
+            const curPressed = targetBtn.getAttribute("aria-pressed") || "";
+            if ((curLabel && curLabel !== beforeLabel && !removeRe.test(curLabel)) || (beforePressed === "true" && curPressed === "false")) {
+              return { status: "succeeded", reason: "removed" };
+            }
+          }
           const liveFocal = (curFocal && curFocal.isConnected) ? curFocal : (findFocalContainer() || document);
           const nowAdd = findButton(liveFocal, "bookmark", addRe, removeRe);
           const stillRemove = findButton(liveFocal, "removeBookmark", removeRe);
           if (nowAdd || !stillRemove) {
             return { status: "succeeded", reason: "removed" };
           }
-          if (!retriedClick && Date.now() - clickStart >= 2500) {
+          if (!retriedClick && !clickedMenu && Date.now() - clickStart >= 2500) {
             retriedClick = true;
-            stillRemove.click();
+            triggerClick(stillRemove || targetBtn);
           }
           await sleep(250);
         }
+        const liveAfter = (curFocal && curFocal.isConnected) ? curFocal : (findFocalContainer() || document);
+        const afterBtn = findButton(liveAfter, "removeBookmark", removeRe) || findButton(liveAfter, "bookmark", addRe, removeRe);
+        const afterLabel = afterBtn ? (afterBtn.getAttribute("aria-label") || "").trim() : "";
+        const menuCount = document.querySelectorAll('[role="menuitem"], [role="menu"]').length;
         return {
           status: "failed",
-          reason: `點擊後未確認狀態切換 (testid=${clickedTestId}, label=${clickedLabel})`,
+          reason: `點擊後未確認狀態切換 (tag=${clickedTag}, before=${beforeLabel.slice(0, 45)}, after=${afterLabel.slice(0, 45)}, menus=${menuCount})`,
         };
       }
       const addBtn = findButton(focal, "bookmark", addRe, removeRe);
