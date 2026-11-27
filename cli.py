@@ -26,6 +26,7 @@ def main() -> None:
     p_js = sub.add_parser("import-json", help="Import JSON bookmarks file")
     p_js.add_argument("json_file", help="Path to JSON file")
     p_js.add_argument("--copy-assets-from", default=None, help="Directory containing relative assets/")
+    p_js.add_argument("--media-by-id-dir", default=None, help="Directory containing <tweet_id>-<n>.jpg media files")
 
     p_en = sub.add_parser("enrich", help="Enrich truncated/empty tweets via FxTwitter API")
     p_en.add_argument("--since", default="", help="Only enrich tweets with created_at >= YYYY-MM-DD")
@@ -73,7 +74,14 @@ def main() -> None:
             print(json.dumps(res, ensure_ascii=False))
         elif args.cmd == "import-json":
             assets_src = Path(args.copy_assets_from) if args.copy_assets_from else None
-            res = import_json_bookmarks(Path(args.json_file), conn, copy_assets_from=assets_src, media_dir=media_dir)
+            media_by_id = Path(args.media_by_id_dir) if args.media_by_id_dir else None
+            res = import_json_bookmarks(
+                Path(args.json_file),
+                conn,
+                copy_assets_from=assets_src,
+                media_dir=media_dir,
+                media_by_id_dir=media_by_id,
+            )
             print(json.dumps(res, ensure_ascii=False))
         elif args.cmd == "enrich":
             res = enrich_bookmarks(conn, since=args.since, limit=args.limit, delay=args.delay)

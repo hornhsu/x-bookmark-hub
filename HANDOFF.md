@@ -52,14 +52,14 @@
 
 ## 3. 本機既有資料資產位置（未納入 Git 版控）
 
-1. **已遷移至本專案 `data/` 的資料（詳見 `python cli.py stats`）**：
-   - `D:\Work\x-bookmark-hub\data\bookmarks.db`（由以下來源匯入整合）：
-     - `D:\Work\markbook\db\markbook.db`（8,180 筆舊 `tweet_id`，已自動反算 Snowflake 日期與 `@handle`）
+1. **已全部合併至本專案 `data/` 的資料（詳見 `python cli.py stats`）**：
+   - `D:\Work\x-bookmark-hub\data\bookmarks.db` 與 `data/media/`（已由以下四份來源整合去重）：
+     - `D:\Work\markbook\db\markbook.db`（8,180 筆舊 `tweet_id`，已補齊 Snowflake 日期與 `@handle`）
      - `C:\Users\admin\.gemini\antigravity\scratch\x-bookmarks\bookmarks_raw.json`（602 則 `2026-11-03 ~ 2026-11-26` 貼文）
-     - `C:\Users\admin\.gemini\antigravity\scratch\x-bookmarks\bookmarks_filtered.json` + `assets/`（125 篇 AI 摘要與分類 + 181 張本機圖片）
-2. **另一對話產出（僅供對照參考，尚未強制匯入）**：
-   - `C:\Users\admin\Documents\x-bookmarks\video-gen-vault\`（721 則近半年影片生成討論整理）
-   - 若之後要全量補齊這 8,180 筆舊書籤的內文，建議直接用新版 Extension 在 Chrome 執行一次**全量掃描**，或針對近半年貼文執行 `python cli.py enrich --since 2026-05-26 --limit 500`。
+     - `C:\Users\admin\.gemini\antigravity\scratch\x-bookmarks\bookmarks_filtered.json` + `assets/`（125 篇繁中 AI 摘要與分類 + 181 張本機圖片）
+     - `C:\Users\admin\Documents\x-bookmarks\bookmarks.json`（9,128 則含內文貼文）與 `video-enriched.json`（721 則 FxTwitter 補完全文與互動數據）＋ `video-gen-vault/media/`（745 張本機圖片）
+2. **後續同步建議**：
+   - 歷史近萬則書籤已完成整合，日常只需打開 `python server.py` 並使用 Chrome Extension 跑 **增量同步（Incremental Sync）** 即可於幾秒內拉取最新書籤，再依需求跑 `python cli.py enrich` / `cache-media` / `classify`。
 
 ---
 

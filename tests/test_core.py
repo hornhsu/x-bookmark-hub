@@ -173,6 +173,77 @@ class CoreTests(unittest.TestCase):
         self.assertTrue((obs_out / "00-索引" / "總覽.md").exists())
         self.assertTrue((obs_out / "notes" / "2026-11" / "2026-11-25_smardio_2125546356609790433.md").exists())
 
+    def test_import_opencode_json_and_media_by_id(self) -> None:
+        # Seed existing curated title/summary to ensure merge preserves them
+        upsert_bookmark(
+            self.conn,
+            {
+                "tweet_id": "2125865347584860623",
+                "text": "Vidu短文",
+                "title": "Vidu 限時免費整理",
+                "summary": "已整理的繁中摘要",
+                "category": "影片生成模型",
+            },
+        )
+        self.conn.commit()
+
+        vault_media = self.root / "vault_media"
+        vault_media.mkdir(parents=True)
+        (vault_media / "2125865347584860623-1.jpg").write_bytes(b"imgbytes")
+
+        oc_file = self.root / "video-enriched.json"
+        oc_file.write_text(
+            json.dumps(
+                [
+                    {
+                        "id": "2125865347584860623",
+                        "url": "https://x.com/songguoxiansen/status/2125865347584860623",
+                        "handle": "songguoxiansen",
+                        "author": "松果先森",
+                        "when": "2026-11-26T06:00:00.000Z",
+                        "ym": "2026-11",
+                        "approx": True,
+                        "text": "Vidu短文",
+                        "links": ["https://t.co/SScnbUrJre"],
+                        "media": [],
+                        "models": ["vidu"],
+                        "fx": {
+                            "fullText": "Vidu视频模型免费，可以爽玩5天 https://example.com",
+                            "likes": 24,
+                            "retweets": 2,
+                            "replies": 0,
+                            "views": 3039,
+                            "quote": {"author": "songguoxiansen", "text": "引用內容"},
+                            "media": [
+                                {
+                                    "type": "video",
+                                    "thumb": "https://pbs.twimg.com/amplify_video_thumb/1/img/a.jpg",
+                                    "url": "https://video.twimg.com/amplify_video/1/vid/a.mp4",
+                                }
+                            ],
+                        },
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        res = import_json_bookmarks(oc_file, self.conn, media_dir=self.media_dir, media_by_id_dir=vault_media)
+        self.assertEqual(res["updated"], 1)
+        self.assertEqual(res["assets_copied"], 1)
+
+        row = self.conn.execute("SELECT * FROM bookmarks WHERE tweet_id = ?", ("2125865347584860623",)).fetchone()
+        self.assertEqual(row["title"], "Vidu 限時免費整理")
+        self.assertEqual(row["summary"], "已整理的繁中摘要")
+        self.assertEqual(row["text"], "Vidu视频模型免费，可以爽玩5天 https://example.com")
+        self.assertEqual(row["like_count"], 24)
+        self.assertEqual(row["quoted_text"], "引用內容")
+        self.assertEqual(row["has_video"], 1)
+        self.assertEqual(row["enrich_status"], "ok")
+        self.assertTrue(row["created_at"].startswith("2026-11-26T08:12:50"))
+        self.assertEqual(json.loads(row["local_media"]), ["media/2125865347584860623-1.jpg"])
+        self.assertEqual(json.loads(row["models"]), [])
+
     def test_live_http_server(self) -> None:
         srv_db = self.root / "srv" / "hub.db"
         srv = create_server("127.0.0.1", 0, srv_db)
