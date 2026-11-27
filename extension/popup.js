@@ -279,6 +279,7 @@ async function unbookmarkInStatusPage(tweetId) {
   const addRe = /(?:^|[\s.。])(bookmark|加入書籤|加入书签|書籤|书签|收藏|ブックマーク)(?:$|[\s.。])/i;
   const rateRe = /rate limit exceeded|too many requests|something went wrong\.?\s*try reloading/i;
   const toastErrRe = /rate limit|too many|something went wrong|try again|稍後再試|發生錯誤/i;
+  const toastOkRe = /removed from your bookmarks|已從你的?書籤中?移除|已从你的?书签中?移除|ブックマークから削除/i;
   const deletedRe = /this page doesn.?t exist|this post was deleted|this account doesn.?t exist|unable to view this post|此頁面不存在|此貼文已遭刪除|無法查看此貼文/i;
 
   function findFocalContainer() {
@@ -308,11 +309,12 @@ async function unbookmarkInStatusPage(tweetId) {
     return null;
   }
 
-  function findButton(root, testId, labelRe) {
+  function findButton(root, testId, labelRe, excludeRe = null) {
     const byId = root.querySelector(`[data-testid="${testId}"]`);
     if (byId) return byId;
     for (const btn of root.querySelectorAll('button[aria-label], [role="button"][aria-label]')) {
       const lbl = (btn.getAttribute("aria-label") || "").trim();
+      if (excludeRe && excludeRe.test(lbl)) continue;
       if (labelRe.test(lbl)) return btn;
     }
     return null;
@@ -338,23 +340,53 @@ async function unbookmarkInStatusPage(tweetId) {
     if (focal) {
       const removeBtn = findButton(focal, "removeBookmark", removeRe);
       if (removeBtn) {
-        removeBtn.click();
-        const confirmDeadline = Date.now() + 4500;
+        await sleep(400);
+        const curFocal = findFocalContainer() || focal;
+        const targetBtn = findButton(curFocal, "removeBookmark", removeRe);
+        if (!targetBtn) {
+          if (findButton(curFocal, "bookmark", addRe, removeRe)) {
+            return { status: "succeeded", reason: "already_unbookmarked" };
+          }
+          await sleep(300);
+          continue;
+        }
+        const clickedTestId = targetBtn.getAttribute("data-testid") || "";
+        const clickedLabel = (targetBtn.getAttribute("aria-label") || "").slice(0, 60);
+        targetBtn.scrollIntoView({ block: "center" });
+        targetBtn.click();
+
+        const clickStart = Date.now();
+        const confirmDeadline = clickStart + 8000;
+        let retriedClick = false;
         while (Date.now() < confirmDeadline) {
           const toastEl = document.querySelector('[data-testid="toast"]');
-          if (toastEl && toastErrRe.test(toastEl.innerText || "")) {
-            return { status: "abort", reason: "X 回報錯誤或限流提示，已立即中止" };
+          if (toastEl) {
+            const toastTxt = toastEl.innerText || "";
+            if (toastErrRe.test(toastTxt)) {
+              return { status: "abort", reason: "X 回報錯誤或限流提示，已立即中止" };
+            }
+            if (toastOkRe.test(toastTxt)) {
+              return { status: "succeeded", reason: "removed_toast" };
+            }
           }
-          const nowAdd = findButton(focal, "bookmark", addRe);
-          const stillRemove = findButton(focal, "removeBookmark", removeRe);
+          const liveFocal = (curFocal && curFocal.isConnected) ? curFocal : (findFocalContainer() || document);
+          const nowAdd = findButton(liveFocal, "bookmark", addRe, removeRe);
+          const stillRemove = findButton(liveFocal, "removeBookmark", removeRe);
           if (nowAdd || !stillRemove) {
             return { status: "succeeded", reason: "removed" };
           }
-          await sleep(200);
+          if (!retriedClick && Date.now() - clickStart >= 2500) {
+            retriedClick = true;
+            stillRemove.click();
+          }
+          await sleep(250);
         }
-        return { status: "failed", reason: "點擊後未確認狀態切換" };
+        return {
+          status: "failed",
+          reason: `點擊後未確認狀態切換 (testid=${clickedTestId}, label=${clickedLabel})`,
+        };
       }
-      const addBtn = findButton(focal, "bookmark", addRe);
+      const addBtn = findButton(focal, "bookmark", addRe, removeRe);
       if (addBtn) {
         return { status: "succeeded", reason: "already_unbookmarked" };
       }
