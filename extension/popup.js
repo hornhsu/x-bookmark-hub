@@ -283,6 +283,17 @@ async function unbookmarkInStatusPage(tweetId) {
   const menuRemoveRe = /remove\s*(from\s*)?bookmark|移除書籤|從書籤中?移除|取消書籤|取消收藏|从书签中?移除|ブックマークから削除/i;
   const deletedRe = /this page doesn.?t exist|this post was deleted|this account doesn.?t exist|unable to view this post|此頁面不存在|此貼文已遭刪除|無法查看此貼文/i;
 
+  function findReactProps(el) {
+    let cur = el;
+    for (let depth = 0; cur && depth < 3; depth++, cur = cur.parentElement) {
+      const propKey = Object.keys(cur).find((k) => k.startsWith("__reactProps$"));
+      if (propKey && cur[propKey] && (typeof cur[propKey].onClick === "function" || typeof cur[propKey].onPress === "function")) {
+        return { el: cur, props: cur[propKey] };
+      }
+    }
+    return null;
+  }
+
   function triggerClick(el) {
     el.scrollIntoView({ block: "center" });
     const evOpts = { bubbles: true, cancelable: true, composed: true, button: 0, buttons: 1 };
@@ -362,8 +373,8 @@ async function unbookmarkInStatusPage(tweetId) {
           continue;
         }
         const beforeLabel = (targetBtn.getAttribute("aria-label") || "").trim();
-        const clickedTag = targetBtn.tagName;
         const beforePressed = targetBtn.getAttribute("aria-pressed") || "";
+        const resStart = performance.getEntriesByType("resource").length;
         triggerClick(targetBtn);
 
         const clickStart = Date.now();
@@ -404,19 +415,47 @@ async function unbookmarkInStatusPage(tweetId) {
           if (nowAdd || !stillRemove) {
             return { status: "succeeded", reason: "removed" };
           }
-          if (!retriedClick && !clickedMenu && Date.now() - clickStart >= 2500) {
+          if (!retriedClick && !clickedMenu && Date.now() - clickStart >= 2000) {
             retriedClick = true;
-            triggerClick(stillRemove || targetBtn);
+            const btnNow = stillRemove || targetBtn;
+            const rp = findReactProps(btnNow);
+            if (rp) {
+              try {
+                if (typeof rp.props.onClick === "function") {
+                  rp.props.onClick({
+                    preventDefault() {},
+                    stopPropagation() {},
+                    currentTarget: rp.el,
+                    target: btnNow,
+                    nativeEvent: new MouseEvent("click", { bubbles: true }),
+                  });
+                } else if (typeof rp.props.onPress === "function") {
+                  rp.props.onPress({ preventDefault() {}, stopPropagation() {}, currentTarget: rp.el, target: btnNow });
+                }
+              } catch (_) {
+                triggerClick(btnNow);
+              }
+            } else {
+              triggerClick(btnNow);
+            }
           }
           await sleep(250);
         }
         const liveAfter = (curFocal && curFocal.isConnected) ? curFocal : (findFocalContainer() || document);
         const afterBtn = findButton(liveAfter, "removeBookmark", removeRe) || findButton(liveAfter, "bookmark", addRe, removeRe);
         const afterLabel = afterBtn ? (afterBtn.getAttribute("aria-label") || "").trim() : "";
-        const menuCount = document.querySelectorAll('[role="menuitem"], [role="menu"]').length;
+        const disabled = Boolean(targetBtn.disabled || targetBtn.getAttribute("aria-disabled") === "true");
+        const hasOnClick = Boolean(findReactProps(targetBtn));
+        const netHits = performance
+          .getEntriesByType("resource")
+          .slice(resStart)
+          .map((e) => e.name)
+          .filter((n) => /bookmark|graphql/i.test(n))
+          .map((n) => n.split("?")[0].split("/").slice(-1)[0])
+          .slice(0, 4);
         return {
           status: "failed",
-          reason: `點擊後未確認狀態切換 (tag=${clickedTag}, before=${beforeLabel.slice(0, 45)}, after=${afterLabel.slice(0, 45)}, menus=${menuCount})`,
+          reason: `點擊後未確認狀態切換 (before=${beforeLabel.slice(0, 35)}, after=${afterLabel.slice(0, 35)}, dis=${disabled}, prop=${hasOnClick}, net=${netHits.join(",") || "none"})`,
         };
       }
       const addBtn = findButton(focal, "bookmark", addRe, removeRe);
@@ -466,6 +505,8 @@ unbookmarkBtn.addEventListener("click", async () => {
 
   let bgTab = null;
   let succeededCount = 0;
+  let removedCount = 0;
+  let alreadyCount = 0;
   const failedList = [];
   let abortReason = "";
 
@@ -499,6 +540,7 @@ unbookmarkBtn.addEventListener("click", async () => {
         try {
           execRes = await chrome.scripting.executeScript({
             target: { tabId: bgTab.id },
+            world: "MAIN",
             func: unbookmarkInStatusPage,
             args: [item.tweet_id],
           });
@@ -506,6 +548,7 @@ unbookmarkBtn.addEventListener("click", async () => {
           await new Promise((r) => setTimeout(r, 1000));
           execRes = await chrome.scripting.executeScript({
             target: { tabId: bgTab.id },
+            world: "MAIN",
             func: unbookmarkInStatusPage,
             args: [item.tweet_id],
           });
@@ -517,6 +560,8 @@ unbookmarkBtn.addEventListener("click", async () => {
 
       if (stepRes.status === "succeeded") {
         succeededCount++;
+        if (stepRes.reason === "already_unbookmarked") alreadyCount++;
+        else removedCount++;
         await proxyRequest(serverUrl, "/api/unbookmark-ack", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -549,16 +594,17 @@ unbookmarkBtn.addEventListener("click", async () => {
 
     const remaining = await refreshQueueCount();
     const remLabel = remaining >= 0 ? `｜剩餘佇列 ${remaining} 則` : "";
+    const okDetail = succeededCount > 0 ? `（實刪 ${removedCount} / 原已取消 ${alreadyCount}）` : "";
     const detailText = failedList.length
       ? "\n失敗原因：\n" + failedList.slice(0, 3).map((f) => `- ${f.tweet_id}: ${f.reason}`).join("\n")
       : "";
     if (abortReason) {
-      setStatus(`${abortReason}\n本次成功 ${succeededCount} 則｜失敗 ${failedList.length} 則${remLabel}${detailText}`, "err");
+      setStatus(`${abortReason}\n本次成功 ${succeededCount} 則${okDetail}｜失敗 ${failedList.length} 則${remLabel}${detailText}`, "err");
     } else if (unbookmarkStopRequested) {
-      setStatus(`已手動停止\n本次成功 ${succeededCount} 則｜失敗 ${failedList.length} 則${remLabel}${detailText}`, "ok");
+      setStatus(`已手動停止\n本次成功 ${succeededCount} 則${okDetail}｜失敗 ${failedList.length} 則${remLabel}${detailText}`, "ok");
     } else {
       const cls = succeededCount === 0 && failedList.length > 0 ? "err" : "ok";
-      setStatus(`批次取消收藏完成\n成功 ${succeededCount} 則｜失敗 ${failedList.length} 則${remLabel}${detailText}`, cls);
+      setStatus(`批次取消收藏完成\n成功 ${succeededCount} 則${okDetail}｜失敗 ${failedList.length} 則${remLabel}${detailText}`, cls);
     }
   } catch (e) {
     setStatus(`取消收藏錯誤：${e.message || String(e)}`, "err");
