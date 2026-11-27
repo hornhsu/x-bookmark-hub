@@ -236,23 +236,31 @@ stopBtn.addEventListener("click", async () => {
   setStatus("正在停止並傳送已收集的書籤...");
 });
 
-function waitTabComplete(tabId, timeoutMs = 15000) {
+function navigateTabAndWait(tabId, targetUrl, tweetId, timeoutMs = 20000) {
   return new Promise((resolve) => {
     let done = false;
-    const finish = (ok) => {
+    const isTargetUrl = (u) => {
+      if (!u || !u.includes("x.com")) return false;
+      return u.includes(`/status/${tweetId}`) || u.includes("/login") || u.includes("/i/flow/login");
+    };
+    const finish = async (ok) => {
       if (done) return;
       done = true;
       chrome.tabs.onUpdated.removeListener(listener);
       clearTimeout(timer);
+      if (ok) {
+        await new Promise((r) => setTimeout(r, 600));
+      }
       resolve(ok);
     };
-    const listener = (updatedId, info) => {
-      if (updatedId === tabId && info.status === "complete") {
+    const listener = (updatedId, info, tab) => {
+      if (updatedId === tabId && info.status === "complete" && isTargetUrl(tab?.url || "")) {
         finish(true);
       }
     };
     const timer = setTimeout(() => finish(false), timeoutMs);
     chrome.tabs.onUpdated.addListener(listener);
+    chrome.tabs.update(tabId, { url: targetUrl }).catch(() => finish(false));
   });
 }
 
@@ -267,15 +275,14 @@ async function cancellableSleep(ms) {
 
 async function unbookmarkInStatusPage(tweetId) {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const removeRe = /remove\s*bookmark|移除書籤|取消書籤|取消收藏|ブックマークを削除/i;
-  const addRe = /^(bookmark|加入書籤|書籤|收藏|ブックマーク)$/i;
+  const removeRe = /remove\s*bookmark|bookmarked|移除書籤|取消書籤|已加入書籤|已收藏|取消收藏|从书签中移除|ブックマークを削除/i;
+  const addRe = /(?:^|[\s.。])(bookmark|加入書籤|加入书签|書籤|书签|收藏|ブックマーク)(?:$|[\s.。])/i;
   const rateRe = /rate limit exceeded|too many requests|something went wrong\.?\s*try reloading/i;
   const toastErrRe = /rate limit|too many|something went wrong|try again|稍後再試|發生錯誤/i;
   const deletedRe = /this page doesn.?t exist|this post was deleted|this account doesn.?t exist|unable to view this post|此頁面不存在|此貼文已遭刪除|無法查看此貼文/i;
 
-  function findFocalArticle() {
+  function findFocalContainer() {
     const articles = [...document.querySelectorAll("article")];
-    if (!articles.length) return null;
     for (const art of articles) {
       for (const t of art.querySelectorAll("time")) {
         const link = t.closest('a[href*="/status/"]');
@@ -291,20 +298,27 @@ async function unbookmarkInStatusPage(tweetId) {
       const link = art.querySelector(`a[href*="/status/${tweetId}"]`);
       if (link) return art;
     }
-    return articles.length === 1 ? articles[0] : null;
+    if (articles.length === 1) return articles[0];
+    if (articles.length === 0) {
+      const primary = document.querySelector('[data-testid="primaryColumn"], main');
+      if (primary && (primary.querySelector('[data-testid="removeBookmark"]') || primary.querySelector('[data-testid="bookmark"]'))) {
+        return primary;
+      }
+    }
+    return null;
   }
 
   function findButton(root, testId, labelRe) {
     const byId = root.querySelector(`[data-testid="${testId}"]`);
     if (byId) return byId;
-    for (const btn of root.querySelectorAll("button[aria-label]")) {
+    for (const btn of root.querySelectorAll('button[aria-label], [role="button"][aria-label]')) {
       const lbl = (btn.getAttribute("aria-label") || "").trim();
       if (labelRe.test(lbl)) return btn;
     }
     return null;
   }
 
-  const deadline = Date.now() + 10000;
+  const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
     if (location.pathname.startsWith("/i/flow/login") || location.pathname === "/login") {
       return { status: "abort", reason: "未偵測到 X 登入狀態，已立即中止" };
@@ -320,7 +334,7 @@ async function unbookmarkInStatusPage(tweetId) {
       return { status: "abort", reason: "未偵測到 X 登入狀態，已立即中止" };
     }
 
-    const focal = findFocalArticle();
+    const focal = findFocalContainer();
     if (focal) {
       const removeBtn = findButton(focal, "removeBookmark", removeRe);
       if (removeBtn) {
@@ -350,7 +364,13 @@ async function unbookmarkInStatusPage(tweetId) {
 
     await sleep(300);
   }
-  return { status: "failed", reason: "載入逾時，找不到書籤按鈕" };
+  const artCnt = document.querySelectorAll("article").length;
+  const rmCnt = document.querySelectorAll('[data-testid="removeBookmark"]').length;
+  const addCnt = document.querySelectorAll('[data-testid="bookmark"]').length;
+  return {
+    status: "failed",
+    reason: `載入逾時 (${location.pathname}, articles=${artCnt}, rm=${rmCnt}, add=${addCnt})`,
+  };
 }
 
 stopUnbookmarkBtn.addEventListener("click", () => {
@@ -399,17 +419,32 @@ unbookmarkBtn.addEventListener("click", async () => {
       const item = items[i];
       setStatus(`取消收藏中 (${i + 1}/${items.length})：${item.tweet_id}...`);
 
-      await chrome.tabs.update(bgTab.id, { url: `https://x.com/i/status/${item.tweet_id}` });
-      await waitTabComplete(bgTab.id, 15000);
+      const rawUrl = String(item.url || "").trim();
+      const targetUrl =
+        /^https:\/\/(?:x|twitter)\.com\/.+\/status\/\d+/.test(rawUrl) && rawUrl.includes(`/status/${item.tweet_id}`)
+          ? rawUrl.replace(/^https:\/\/twitter\.com/, "https://x.com")
+          : `https://x.com/i/status/${item.tweet_id}`;
+
+      await navigateTabAndWait(bgTab.id, targetUrl, item.tweet_id, 20000);
       if (unbookmarkStopRequested) break;
 
       let stepRes;
       try {
-        const execRes = await chrome.scripting.executeScript({
-          target: { tabId: bgTab.id },
-          func: unbookmarkInStatusPage,
-          args: [item.tweet_id],
-        });
+        let execRes;
+        try {
+          execRes = await chrome.scripting.executeScript({
+            target: { tabId: bgTab.id },
+            func: unbookmarkInStatusPage,
+            args: [item.tweet_id],
+          });
+        } catch (firstErr) {
+          await new Promise((r) => setTimeout(r, 1000));
+          execRes = await chrome.scripting.executeScript({
+            target: { tabId: bgTab.id },
+            func: unbookmarkInStatusPage,
+            args: [item.tweet_id],
+          });
+        }
         stepRes = execRes?.[0]?.result || { status: "failed", reason: "無回傳結果" };
       } catch (err) {
         stepRes = { status: "failed", reason: err.message || "腳本執行失敗" };
@@ -449,12 +484,16 @@ unbookmarkBtn.addEventListener("click", async () => {
 
     const remaining = await refreshQueueCount();
     const remLabel = remaining >= 0 ? `｜剩餘佇列 ${remaining} 則` : "";
+    const detailText = failedList.length
+      ? "\n失敗原因：\n" + failedList.slice(0, 3).map((f) => `- ${f.tweet_id}: ${f.reason}`).join("\n")
+      : "";
     if (abortReason) {
-      setStatus(`${abortReason}\n本次成功 ${succeededCount} 則｜失敗 ${failedList.length} 則${remLabel}`, "err");
+      setStatus(`${abortReason}\n本次成功 ${succeededCount} 則｜失敗 ${failedList.length} 則${remLabel}${detailText}`, "err");
     } else if (unbookmarkStopRequested) {
-      setStatus(`已手動停止\n本次成功 ${succeededCount} 則｜失敗 ${failedList.length} 則${remLabel}`, "ok");
+      setStatus(`已手動停止\n本次成功 ${succeededCount} 則｜失敗 ${failedList.length} 則${remLabel}${detailText}`, "ok");
     } else {
-      setStatus(`批次取消收藏完成\n成功 ${succeededCount} 則｜失敗 ${failedList.length} 則${remLabel}`, "ok");
+      const cls = succeededCount === 0 && failedList.length > 0 ? "err" : "ok";
+      setStatus(`批次取消收藏完成\n成功 ${succeededCount} 則｜失敗 ${failedList.length} 則${remLabel}${detailText}`, cls);
     }
   } catch (e) {
     setStatus(`取消收藏錯誤：${e.message || String(e)}`, "err");
