@@ -6,6 +6,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+import urllib.error
 import urllib.request
 
 from server import create_server
@@ -287,6 +288,102 @@ class CoreTests(unittest.TestCase):
             with urllib.request.urlopen(f"{base}/api/stats") as resp:
                 st = json.loads(resp.read().decode("utf-8"))
             self.assertEqual(st["pending_unbookmark"], 1)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_phase3_batch_status_and_unbookmark_ack(self) -> None:
+        srv_db = self.root / "srv3" / "hub.db"
+        srv = create_server("127.0.0.1", 0, srv_db)
+        port = srv.server_address[1]
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        try:
+            base = f"http://127.0.0.1:{port}"
+            seed = [
+                {"tweet_id": "2125546356609790433", "text": "Post A", "author_handle": "@a"},
+                {"tweet_id": "2125519521427681660", "text": "Post B", "author_handle": "@b"},
+                {"tweet_id": "2125842510585192551", "text": "Post C", "author_handle": "@c"},
+            ]
+            req = urllib.request.Request(
+                f"{base}/api/bookmarks",
+                data=json.dumps(seed).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req) as resp:
+                self.assertEqual(json.loads(resp.read().decode("utf-8"))["inserted"], 3)
+
+            # Invalid status returns 400
+            bad_req = urllib.request.Request(
+                f"{base}/api/bookmarks/batch-status",
+                data=json.dumps({"tweet_ids": ["2125546356609790433"], "sync_status": "bogus"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(bad_req)
+            self.assertEqual(ctx.exception.code, 400)
+
+            # Batch mark 2 items pending_unbookmark (leave Post C active)
+            batch_req = urllib.request.Request(
+                f"{base}/api/bookmarks/batch-status",
+                data=json.dumps(
+                    {
+                        "tweet_ids": ["2125546356609790433", "2125519521427681660"],
+                        "sync_status": "pending_unbookmark",
+                    }
+                ).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(batch_req) as resp:
+                batch_res = json.loads(resp.read().decode("utf-8"))
+            self.assertEqual(batch_res["updated"], 2)
+
+            # Queue limit=1 should return 1 item with total_pending=2
+            with urllib.request.urlopen(f"{base}/api/unbookmark-queue?limit=1") as resp:
+                q_lim = json.loads(resp.read().decode("utf-8"))
+            self.assertEqual(q_lim["count"], 1)
+            self.assertEqual(q_lim["total_pending"], 2)
+
+            # Ack: Post A succeeded, Post C (active) included in succeeded should NOT be changed, Post B failed
+            ack_req = urllib.request.Request(
+                f"{base}/api/unbookmark-ack",
+                data=json.dumps(
+                    {
+                        "succeeded": ["2125546356609790433", "2125842510585192551"],
+                        "failed": [{"tweet_id": "2125519521427681660", "reason": "timeout"}],
+                    }
+                ).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(ack_req) as resp:
+                ack_res = json.loads(resp.read().decode("utf-8"))
+            self.assertEqual(ack_res["updated"], 1)
+            self.assertEqual(ack_res["remaining"], 1)
+
+            # Verify statuses via query
+            with urllib.request.urlopen(f"{base}/api/bookmarks?status=unbookmarked") as resp:
+                un_res = json.loads(resp.read().decode("utf-8"))
+            self.assertEqual([x["tweet_id"] for x in un_res["items"]], ["2125546356609790433"])
+
+            with urllib.request.urlopen(f"{base}/api/bookmarks?status=active") as resp:
+                act_res = json.loads(resp.read().decode("utf-8"))
+            self.assertEqual([x["tweet_id"] for x in act_res["items"]], ["2125842510585192551"])
+
+            # Batch restore Post B back to active
+            restore_req = urllib.request.Request(
+                f"{base}/api/bookmarks/batch-status",
+                data=json.dumps({"tweet_ids": ["2125519521427681660"], "sync_status": "active"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(restore_req) as resp:
+                self.assertEqual(json.loads(resp.read().decode("utf-8"))["updated"], 1)
+            with urllib.request.urlopen(f"{base}/api/unbookmark-queue") as resp:
+                self.assertEqual(json.loads(resp.read().decode("utf-8"))["total_pending"], 0)
         finally:
             srv.shutdown()
             srv.server_close()

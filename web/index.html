@@ -38,6 +38,27 @@
     .grid.masonry .card { break-inside: avoid; margin-bottom: 16px; }
     .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
     .card.pending { border-color: var(--danger); opacity: 0.86; }
+    .card.selected { box-shadow: 0 0 0 2px var(--acc); border-color: var(--acc); }
+    .sel-box { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font-size: 0.76rem; color: var(--dim); margin-left: auto; user-select: none; }
+    .sel-box input { accent-color: var(--acc); cursor: pointer; }
+    .badge.done { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); }
+    button.btn.queue-has { border-color: var(--danger); color: var(--danger); }
+    button.btn.queue-active { background: var(--danger); color: #fff; border-color: var(--danger); font-weight: 600; }
+    button.btn.danger { background: var(--danger); color: #fff; border-color: var(--danger); font-weight: 600; }
+    button.btn.restore { background: var(--ok); color: #041b09; border-color: var(--ok); font-weight: 600; }
+    .queue-banner {
+      display: none; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+      background: color-mix(in srgb, var(--danger) 12%, var(--card)); border: 1px solid var(--danger);
+      border-radius: 10px; padding: 11px 14px; margin-bottom: 14px; font-size: 0.85rem;
+    }
+    .queue-banner.open { display: flex; }
+    .batch-bar {
+      position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 45;
+      display: none; align-items: center; flex-wrap: wrap; gap: 8px;
+      background: var(--elev); border: 1px solid var(--acc); border-radius: 12px;
+      padding: 9px 14px; box-shadow: 0 10px 30px rgba(0, 0, 0, .45); max-width: 95vw;
+    }
+    .batch-bar.open { display: flex; }
     .media { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 2px; background: #05070a; }
     .media img { width: 100%; max-height: 250px; object-fit: cover; display: block; cursor: zoom-in; }
     .body { padding: 13px 15px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
@@ -82,8 +103,10 @@
         <select id="statusSelect">
           <option value="active">有效書籤</option>
           <option value="pending_unbookmark">待取消收藏</option>
+          <option value="unbookmarked">已取消收藏</option>
           <option value="all">全部狀態</option>
         </select>
+        <button class="btn" id="queueViewBtn" type="button">待取消佇列 (<span id="queueCountBadge">0</span>)</button>
         <select id="sortSelect">
           <option value="newest">最新貼文</option>
           <option value="likes">最多讚</option>
@@ -101,9 +124,17 @@
 </header>
 
 <main>
+  <div class="queue-banner" id="queueBanner">
+    <div id="queueBannerText">待取消收藏佇列檢視：請覆核下列貼文，確認無誤後開啟 Chrome 擴充功能執行低風險限速取消收藏。</div>
+    <div class="controls">
+      <button class="btn" id="queueBackBtn" type="button">← 返回有效書籤</button>
+      <button class="btn restore" id="queueRestoreAllBtn" type="button">全部還原保留</button>
+    </div>
+  </div>
   <div class="toolbar">
     <span id="resultInfo">查詢中...</span>
     <div class="controls">
+      <button class="btn" id="selectPageBtn" type="button">全選本頁</button>
       <button class="btn" id="classifyBtn" type="button">執行規則分類</button>
       <button class="btn primary" id="exportHtmlBtn" type="button">一鍵匯出離線 HTML</button>
       <button class="btn" id="exportObsBtn" type="button">一鍵匯出 Obsidian Vault</button>
@@ -117,14 +148,46 @@
   </div>
 </main>
 
+<div class="batch-bar" id="batchBar">
+  <strong id="batchCount">已選取 0 則</strong>
+  <button class="btn" id="batchSelectPageBtn" type="button">全選本頁</button>
+  <button class="btn" id="batchClearBtn" type="button">取消全選</button>
+  <button class="btn danger" id="batchMarkBtn" type="button">批次標記取消收藏</button>
+  <button class="btn restore" id="batchRestoreBtn" type="button">批次還原保留</button>
+</div>
+
 <div class="toast" id="toast"></div>
 <div class="lb" id="lb"><img id="lbImg" src="" alt="預覽大圖" /></div>
 
 <script>
 const KIND_LABELS = { tutorial: "教學／工作流", showcase: "作品／展示", review: "評測／對比", news: "發布／新聞", question: "提問" };
 const state = { q: "", category: "", kind: "", model: "", sincePreset: "", status: "active", sort: "newest", masonry: false, limit: 60, offset: 0, total: 0 };
+const selectedIds = new Set();
+let currentPageIds = [];
 
 const esc = s => String(s || "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" })[c]);
+
+function updateSelectionUi() {
+  const bar = document.getElementById("batchBar");
+  document.getElementById("batchCount").textContent = `已選取 ${selectedIds.size} 則`;
+  bar.classList.toggle("open", selectedIds.size > 0);
+  const allSelected = currentPageIds.length > 0 && currentPageIds.every(id => selectedIds.has(id));
+  document.getElementById("selectPageBtn").textContent = allSelected ? "取消全選本頁" : "全選本頁";
+}
+
+function updateQueueControls(pendingCount) {
+  document.getElementById("queueCountBadge").textContent = String(pendingCount || 0);
+  const qBtn = document.getElementById("queueViewBtn");
+  const isQueue = state.status === "pending_unbookmark";
+  qBtn.classList.toggle("queue-active", isQueue);
+  qBtn.classList.toggle("queue-has", !isQueue && (pendingCount || 0) > 0);
+  const banner = document.getElementById("queueBanner");
+  banner.classList.toggle("open", isQueue);
+  if (isQueue) {
+    document.getElementById("queueBannerText").textContent =
+      `待取消收藏佇列（共 ${pendingCount || 0} 則）：可勾選或單筆「還原保留」，確認後再於 Chrome 擴充功能執行低風險限速取消收藏。`;
+  }
+}
 
 function toast(msg) {
   const el = document.getElementById("toast");
@@ -147,6 +210,7 @@ async function fetchStats() {
   const s = await res.json();
   document.getElementById("statsLine").textContent =
     `總書籤 ${s.total} 則｜有內文 ${s.with_text} 則｜本機有圖 ${s.with_local_media} 則｜待取消 ${s.pending_unbookmark} 則｜時間 ${s.earliest ? s.earliest.slice(0,10) : "-"} ～ ${s.latest ? s.latest.slice(0,10) : "-"}`;
+  updateQueueControls(s.pending_unbookmark || 0);
 }
 
 function renderFacets(facets) {
@@ -207,11 +271,13 @@ async function loadBookmarks() {
   grid.innerHTML = (data.items || []).map(x => {
     const mediaList = (x.local_media && x.local_media.length) ? x.local_media.map(m => m.startsWith("http") ? m : `/${m}`) : (x.media_urls || []);
     const isPending = x.sync_status === "pending_unbookmark";
-    const statusBtn = isPending
+    const isUnbookmarked = x.sync_status === "unbookmarked";
+    const isSelected = selectedIds.has(x.tweet_id);
+    const statusBtn = (isPending || isUnbookmarked)
       ? `<button class="mini-btn restore" data-status-id="${esc(x.tweet_id)}" data-next="active">還原保留</button>`
       : `<button class="mini-btn danger" data-status-id="${esc(x.tweet_id)}" data-next="pending_unbookmark">標記取消收藏</button>`;
     return `
-      <article class="card ${isPending ? "pending" : ""}">
+      <article class="card ${isPending ? "pending" : ""} ${isSelected ? "selected" : ""}">
         ${mediaList.length ? `<div class="media">${mediaList.slice(0, 4).map(src => `<img loading="lazy" src="${esc(src)}" alt="" onerror="this.style.display='none'">`).join("")}</div>` : ""}
         <div class="body">
           <div class="meta">
@@ -219,8 +285,10 @@ async function loadBookmarks() {
             ${x.content_kind ? `<span class="tag">${esc(KIND_LABELS[x.content_kind] || x.content_kind)}</span>` : ""}
             ${x.has_video ? `<span class="badge v">▶ 影片</span>` : ""}
             ${isPending ? `<span class="badge p">待取消收藏</span>` : ""}
+            ${isUnbookmarked ? `<span class="badge done">已取消收藏</span>` : ""}
             <span>${esc((x.created_at || "").slice(0, 10))}</span>
             ${x.like_count ? `<span>♥ ${x.like_count}</span>` : ""}
+            <label class="sel-box"><input type="checkbox" data-select-id="${esc(x.tweet_id)}" ${isSelected ? "checked" : ""}/> 選取</label>
           </div>
           ${x.title ? `<h2 class="title">${esc(x.title)}</h2>` : ""}
           ${x.summary ? `<p class="sum">${esc(x.summary)}</p>` : ""}
@@ -236,10 +304,23 @@ async function loadBookmarks() {
     `;
   }).join("");
 
+  currentPageIds = (data.items || []).map(x => x.tweet_id);
+  updateSelectionUi();
+
   grid.querySelectorAll("img").forEach(img => {
     img.onclick = () => {
       document.getElementById("lbImg").src = img.src;
       document.getElementById("lb").classList.add("open");
+    };
+  });
+
+  grid.querySelectorAll("[data-select-id]").forEach(cb => {
+    cb.onchange = () => {
+      const tid = cb.dataset.selectId;
+      if (cb.checked) selectedIds.add(tid);
+      else selectedIds.delete(tid);
+      cb.closest(".card")?.classList.toggle("selected", cb.checked);
+      updateSelectionUi();
     };
   });
 
@@ -252,6 +333,7 @@ async function loadBookmarks() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sync_status: next }),
       });
+      selectedIds.delete(tid);
       await Promise.all([fetchStats(), loadBookmarks()]);
     };
   });
@@ -263,7 +345,71 @@ document.getElementById("searchInput").oninput = e => {
   searchTimer = setTimeout(() => { state.q = e.target.value; state.offset = 0; loadBookmarks(); }, 220);
 };
 document.getElementById("sinceSelect").onchange = e => { state.sincePreset = e.target.value; state.offset = 0; loadBookmarks(); };
-document.getElementById("statusSelect").onchange = e => { state.status = e.target.value; state.offset = 0; loadBookmarks(); };
+document.getElementById("statusSelect").onchange = e => { state.status = e.target.value; state.offset = 0; Promise.all([fetchStats(), loadBookmarks()]); };
+document.getElementById("queueViewBtn").onclick = () => {
+  state.status = state.status === "pending_unbookmark" ? "active" : "pending_unbookmark";
+  document.getElementById("statusSelect").value = state.status;
+  state.offset = 0;
+  Promise.all([fetchStats(), loadBookmarks()]);
+};
+document.getElementById("queueBackBtn").onclick = () => {
+  state.status = "active";
+  document.getElementById("statusSelect").value = "active";
+  state.offset = 0;
+  Promise.all([fetchStats(), loadBookmarks()]);
+};
+document.getElementById("queueRestoreAllBtn").onclick = async () => {
+  if (!confirm("確定要將所有待取消收藏的書籤還原為有效保留嗎？")) return;
+  const qRes = await fetch("/api/unbookmark-queue");
+  const qData = await qRes.json();
+  const ids = (qData.items || []).map(x => x.tweet_id);
+  if (!ids.length) { toast("目前沒有待取消收藏的項目"); return; }
+  const res = await fetch("/api/bookmarks/batch-status", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tweet_ids: ids, sync_status: "active" }),
+  });
+  const r = await res.json();
+  selectedIds.clear();
+  toast(`已還原 ${r.updated || 0} 則書籤為有效保留`);
+  await Promise.all([fetchStats(), loadBookmarks()]);
+};
+function toggleSelectPage(forceSelect) {
+  const allSelected = currentPageIds.length > 0 && currentPageIds.every(id => selectedIds.has(id));
+  const shouldSelect = forceSelect !== undefined ? forceSelect : !allSelected;
+  currentPageIds.forEach(id => { if (shouldSelect) selectedIds.add(id); else selectedIds.delete(id); });
+  document.querySelectorAll("[data-select-id]").forEach(cb => {
+    const checked = selectedIds.has(cb.dataset.selectId);
+    cb.checked = checked;
+    cb.closest(".card")?.classList.toggle("selected", checked);
+  });
+  updateSelectionUi();
+}
+async function applyBatchStatus(syncStatus, label) {
+  const ids = [...selectedIds];
+  if (!ids.length) return;
+  const res = await fetch("/api/bookmarks/batch-status", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tweet_ids: ids, sync_status: syncStatus }),
+  });
+  const r = await res.json();
+  selectedIds.clear();
+  toast(`${label}完成：更新 ${r.updated || 0} 則`);
+  await Promise.all([fetchStats(), loadBookmarks()]);
+}
+document.getElementById("selectPageBtn").onclick = () => toggleSelectPage();
+document.getElementById("batchSelectPageBtn").onclick = () => toggleSelectPage(true);
+document.getElementById("batchClearBtn").onclick = () => {
+  selectedIds.clear();
+  document.querySelectorAll("[data-select-id]").forEach(cb => {
+    cb.checked = false;
+    cb.closest(".card")?.classList.remove("selected");
+  });
+  updateSelectionUi();
+};
+document.getElementById("batchMarkBtn").onclick = () => applyBatchStatus("pending_unbookmark", "批次標記取消收藏");
+document.getElementById("batchRestoreBtn").onclick = () => applyBatchStatus("active", "批次還原保留");
 document.getElementById("sortSelect").onchange = e => { state.sort = e.target.value; state.offset = 0; loadBookmarks(); };
 document.getElementById("layoutBtn").onclick = () => { state.masonry = !state.masonry; loadBookmarks(); };
 document.getElementById("themeBtn").onclick = () => { const r = document.documentElement; r.dataset.theme = r.dataset.theme === "dark" ? "light" : "dark"; };

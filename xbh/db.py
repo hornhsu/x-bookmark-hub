@@ -551,7 +551,7 @@ def update_sync_status(conn: sqlite3.Connection, tweet_ids: list[str], status: s
     """Update sync_status for one or more tweet IDs."""
     if status not in VALID_SYNC_STATUSES:
         raise ValueError(f"Invalid sync_status: {status}")
-    ids = [str(tid).strip() for tid in tweet_ids if str(tid).strip()]
+    ids = list(dict.fromkeys(str(tid).strip() for tid in tweet_ids if str(tid).strip()))
     if not ids:
         return 0
     placeholders = ",".join("?" for _ in ids)
@@ -561,6 +561,52 @@ def update_sync_status(conn: sqlite3.Connection, tweet_ids: list[str], status: s
     )
     conn.commit()
     return cur.rowcount
+
+
+def get_unbookmark_queue(conn: sqlite3.Connection, limit: int = 0) -> dict[str, Any]:
+    """Return pending_unbookmark items ordered oldest-updated first."""
+    total_pending = conn.execute(
+        "SELECT COUNT(*) FROM bookmarks WHERE sync_status = 'pending_unbookmark'"
+    ).fetchone()[0]
+    if limit and limit > 0:
+        rows = conn.execute(
+            "SELECT * FROM bookmarks WHERE sync_status = 'pending_unbookmark' ORDER BY updated_at ASC, id ASC LIMIT ?",
+            (int(limit),),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM bookmarks WHERE sync_status = 'pending_unbookmark' ORDER BY updated_at ASC, id ASC"
+        ).fetchall()
+    items = [row_to_dict(r) for r in rows]
+    return {"items": items, "count": len(items), "total_pending": total_pending}
+
+
+def ack_unbookmark_results(
+    conn: sqlite3.Connection,
+    succeeded: list[str],
+    failed: list[Any] | None = None,
+) -> dict[str, Any]:
+    """Acknowledge unbookmark execution results, moving confirmed IDs to 'unbookmarked'."""
+    clean_ok = list(dict.fromkeys(str(tid).strip() for tid in succeeded if str(tid).strip()))
+    changed = 0
+    if clean_ok:
+        placeholders = ",".join("?" for _ in clean_ok)
+        cur = conn.execute(
+            f"UPDATE bookmarks SET sync_status = 'unbookmarked', updated_at = datetime('now') "
+            f"WHERE sync_status = 'pending_unbookmark' AND tweet_id IN ({placeholders})",
+            clean_ok,
+        )
+        conn.commit()
+        changed = cur.rowcount
+    remaining = conn.execute(
+        "SELECT COUNT(*) FROM bookmarks WHERE sync_status = 'pending_unbookmark'"
+    ).fetchone()[0]
+    return {
+        "updated": changed,
+        "succeeded": len(clean_ok),
+        "failed": len(failed or []),
+        "remaining": remaining,
+    }
 
 
 def get_stats(conn: sqlite3.Connection) -> dict[str, Any]:

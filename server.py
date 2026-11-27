@@ -15,11 +15,12 @@ import urllib.parse
 from xbh.classifier import classify_all, classify_bookmark
 from xbh.db import (
     DEFAULT_DB_PATH,
+    ack_unbookmark_results,
     get_known_ids,
     get_stats,
+    get_unbookmark_queue,
     init_db,
     query_bookmarks,
-    row_to_dict,
     update_sync_status,
     upsert_many,
 )
@@ -193,12 +194,15 @@ class BookmarkHubHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/unbookmark-queue":
+            try:
+                limit_val = int(qs.get("limit", ["0"])[0] or 0)
+            except ValueError:
+                self._send_json({"error": "Invalid limit parameter"}, HTTPStatus.BAD_REQUEST)
+                return
+            limit_val = max(0, limit_val)
             with self.server.db_lock:
-                rows = self.server.conn.execute(
-                    "SELECT * FROM bookmarks WHERE sync_status = 'pending_unbookmark' ORDER BY updated_at ASC"
-                ).fetchall()
-                items = [row_to_dict(r) for r in rows]
-            self._send_json({"items": items, "count": len(items)})
+                data = get_unbookmark_queue(self.server.conn, limit=limit_val)
+            self._send_json(data)
             return
 
         self._send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
@@ -247,6 +251,45 @@ class BookmarkHubHandler(BaseHTTPRequestHandler):
                     "total": stats["total"],
                 }
             )
+            return
+
+        if path == "/api/bookmarks/batch-status":
+            try:
+                body = self._read_json_body()
+            except json.JSONDecodeError:
+                self._send_json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            if not isinstance(body, dict) or not isinstance(body.get("tweet_ids"), list) or not isinstance(body.get("sync_status"), str):
+                self._send_json({"error": "Expected JSON object with tweet_ids (list) and sync_status (str)"}, HTTPStatus.BAD_REQUEST)
+                return
+            clean_ids = [str(tid).strip() for tid in body["tweet_ids"] if str(tid).strip()]
+            status = body["sync_status"].strip()
+            try:
+                with self.server.db_lock:
+                    changed = update_sync_status(self.server.conn, clean_ids, status)
+            except ValueError as e:
+                self._send_json({"error": str(e)}, HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json({"sync_status": status, "requested": len(clean_ids), "updated": changed})
+            return
+
+        if path == "/api/unbookmark-ack":
+            try:
+                body = self._read_json_body()
+            except json.JSONDecodeError:
+                self._send_json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            if not isinstance(body, dict):
+                self._send_json({"error": "Expected JSON object"}, HTTPStatus.BAD_REQUEST)
+                return
+            succeeded = body.get("succeeded", [])
+            failed = body.get("failed", [])
+            if not isinstance(succeeded, list) or not isinstance(failed, list):
+                self._send_json({"error": "succeeded and failed must be lists"}, HTTPStatus.BAD_REQUEST)
+                return
+            with self.server.db_lock:
+                res = ack_unbookmark_results(self.server.conn, succeeded, failed)
+            self._send_json(res)
             return
 
         if path == "/api/classify":
