@@ -73,7 +73,8 @@
 2. **Web UI 強化（`web/index.html`）**：
    - 新增卡片多選勾選框、浮動批次工具列（「全選本頁」、「批次標記取消收藏」、「批次還原保留」）與「待取消佇列」專屬檢視。
 3. **Chrome Extension 取消收藏執行器（`extension/`）**：
-   - `popup.html` / `popup.js` 支援單背景分頁造訪 `https://x.com/i/status/<tweet_id>` 並精準定位主貼文 `<article>` 執行取消收藏，具備 2.5–5 秒隨機延遲、增量即時 ack 與 429／未登入立即中止保護。
+   - `popup.html` / `popup.js` 以單一背景分頁執行取消收藏：**優先**在已登入的 x.com 分頁內呼叫 X 網頁版自身的內部 GraphQL `DeleteBookmark`（非付費開發者 API，queryId／bearer 於執行時從 x.com 載入的 bundle 自動擷取，常數僅作備援）；API 不可用時**自動改用** `chrome.debugger` 送出真實（isTrusted）滑鼠點擊。具備 2.5–5 秒隨機延遲、逐筆即時 ack、429／未登入／API 剩餘額度不足立即中止保護。
+   - 注意：X 會忽略腳本合成的點擊事件（`isTrusted=false`），因此不能再用 `element.click()` / `dispatchEvent` 的方式操作書籤按鈕。
 
 ### Phase 4：VM / Docker 部署與遠端跨機同步（已完成）
 1. **MV3 Service Worker 代理（解決 Mixed Content）**：

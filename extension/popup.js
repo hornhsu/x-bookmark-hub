@@ -241,6 +241,7 @@ function navigateTabAndWait(tabId, targetUrl, tweetId, timeoutMs = 20000) {
     let done = false;
     const isTargetUrl = (u) => {
       if (!u || !u.includes("x.com")) return false;
+      if (!tweetId) return true;
       return u.includes(`/status/${tweetId}`) || u.includes("/login") || u.includes("/i/flow/login");
     };
     const finish = async (ok) => {
@@ -273,110 +274,126 @@ async function cancellableSleep(ms) {
   }
 }
 
-async function unbookmarkInStatusPage(tweetId) {
+// X web client's own internal GraphQL endpoint (the same request x.com sends when you click
+// the bookmark button with your logged-in session). This is NOT the paid X developer API.
+// queryId / bearer are discovered from the loaded x.com bundle at runtime; constants are fallbacks only.
+const FALLBACK_DELETE_BOOKMARK_QID = "Wlmlj2-xzyS1GN3a6cj-mQ";
+const FALLBACK_WEB_BEARER =
+  "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
+
+// Injected into an x.com tab (MAIN world). Returns { status: succeeded|failed|abort|fallback, reason, rateRemaining }.
+async function unbookmarkViaGraphQL(tweetId, fallbackQid, fallbackBearer) {
+  if (location.pathname.startsWith("/i/flow/login") || location.pathname === "/login") {
+    return { status: "abort", reason: "未偵測到 X 登入狀態，已立即中止" };
+  }
+  const ct0 = (document.cookie.match(/(?:^|;\s*)ct0=([^;]+)/) || [])[1] || "";
+  if (!ct0) {
+    return { status: "abort", reason: "未偵測到 X 登入狀態（缺少 ct0），已立即中止" };
+  }
+
+  if (!window.__xbhGqlCfg) {
+    const found = { queryId: "", bearer: "", source: "fallback" };
+    try {
+      const srcs = [...document.querySelectorAll("script[src]")]
+        .map((s) => s.src)
+        .filter((u) => /abs\.twimg\.com\/responsive-web\/.+\/main\.[^/]+\.js/.test(u));
+      for (const src of srcs) {
+        const txt = await (await fetch(src)).text();
+        const q = txt.match(/queryId:"([^"]+)",operationName:"DeleteBookmark"/);
+        const b = txt.match(/"Bearer (AAAAAAAAAAAAAAAAAAAAA[^"]+)"/) || txt.match(/"(AAAAAAAAAAAAAAAAAAAAA[A-Za-z0-9%]{40,})"/);
+        if (q) found.queryId = q[1];
+        if (b) found.bearer = b[1];
+        if (found.queryId) {
+          found.source = "bundle";
+          break;
+        }
+      }
+    } catch (_) {}
+    if (!found.queryId) found.queryId = fallbackQid;
+    if (!found.bearer) found.bearer = fallbackBearer;
+    window.__xbhGqlCfg = found;
+  }
+  const cfg = window.__xbhGqlCfg;
+
+  let resp;
+  try {
+    resp = await fetch(`/i/api/graphql/${cfg.queryId}/DeleteBookmark`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        authorization: `Bearer ${cfg.bearer}`,
+        "x-csrf-token": ct0,
+        "x-twitter-auth-type": "OAuth2Session",
+        "x-twitter-active-user": "yes",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ variables: { tweet_id: tweetId }, queryId: cfg.queryId }),
+    });
+  } catch (err) {
+    return { status: "fallback", reason: `API 連線失敗：${err.message || err}` };
+  }
+
+  const remainingHdr = resp.headers.get("x-rate-limit-remaining");
+  const rateRemaining = remainingHdr === null ? null : Number(remainingHdr);
+  if (resp.status === 429) {
+    return { status: "abort", reason: "X 回傳 429 限流，已立即中止" };
+  }
+  let text = "";
+  let data = null;
+  try {
+    text = await resp.text();
+    data = text ? JSON.parse(text) : null;
+  } catch (_) {}
+  if (!resp.ok) {
+    return { status: "fallback", reason: `API HTTP ${resp.status}（queryId 來源：${cfg.source}）` };
+  }
+  if (data && data.data && data.data.tweet_bookmark_delete === "Done") {
+    return { status: "succeeded", reason: "removed_api", rateRemaining };
+  }
+  const errMsg = ((data && data.errors) || [])
+    .map((e) => `${e.code || ""} ${e.message || ""}`.trim())
+    .join("; ");
+  if (/rate limit|\b88\b/i.test(errMsg)) {
+    return { status: "abort", reason: "X 回報限流，已立即中止" };
+  }
+  if (/not bookmarked|haven.?t bookmarked|not in .*bookmark|bookmark.*not found/i.test(errMsg)) {
+    return { status: "succeeded", reason: "already_unbookmarked", rateRemaining };
+  }
+  if (/no status found|deleted|\b144\b|not found/i.test(errMsg)) {
+    return { status: "failed", reason: `貼文不存在或無法檢視（${errMsg.slice(0, 60)}）` };
+  }
+  return { status: "fallback", reason: `API 非預期回應：${(errMsg || text || "").slice(0, 80)}` };
+}
+
+// Injected into a status page (MAIN world). Reports bookmark state of the focal tweet.
+// wantCoords=true: returns as soon as state is known, with viewport coords of the "Bookmarked" button.
+// wantCoords=false: keeps polling until the button flips to not-bookmarked (or timeout).
+async function probeBookmark(tweetId, timeoutMs, wantCoords) {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const removeRe = /remove\s*bookmark|bookmarked|移除書籤|取消書籤|已加入書籤|已收藏|取消收藏|从书签中移除|ブックマークを削除/i;
   const addRe = /(?:^|[\s.。])(bookmark|加入書籤|加入书签|書籤|书签|收藏|ブックマーク)(?:$|[\s.。])/i;
   const rateRe = /rate limit exceeded|too many requests|something went wrong\.?\s*try reloading/i;
-  const toastErrRe = /rate limit|too many|something went wrong|try again|稍後再試|發生錯誤/i;
   const toastOkRe = /removed from your bookmarks|已從你的?書籤中?移除|已从你的?书签中?移除|ブックマークから削除/i;
-  const menuRemoveRe = /remove\s*(from\s*)?bookmark|移除書籤|從書籤中?移除|取消書籤|取消收藏|从书签中?移除|ブックマークから削除/i;
   const deletedRe = /this page doesn.?t exist|this post was deleted|this account doesn.?t exist|unable to view this post|此頁面不存在|此貼文已遭刪除|無法查看此貼文/i;
-
-  function inspectElementProps(el) {
-    const candidates = [el, ...el.querySelectorAll("*"), el.parentElement, el.parentElement?.parentElement].filter(Boolean);
-    const ownKeys = [];
-    const reactFnNames = [];
-    let reactEntry = null;
-    for (const node of candidates) {
-      for (const k of Object.keys(node)) {
-        if (!ownKeys.includes(k)) ownKeys.push(k);
-        if (k.startsWith("__reactProps$") && node[k] && typeof node[k] === "object") {
-          const fnKeys = Object.keys(node[k]).filter((pk) => typeof node[k][pk] === "function");
-          for (const fk of fnKeys) {
-            if (!reactFnNames.includes(fk)) reactFnNames.push(fk);
-          }
-          if (!reactEntry && fnKeys.length > 0) {
-            reactEntry = { el: node, props: node[k], fnKeys };
-          }
-        }
-      }
-    }
-    return { ownKeys: ownKeys.slice(0, 6), reactFnNames: reactFnNames.slice(0, 8), reactEntry };
-  }
-
-  async function triggerClick(el) {
-    el.scrollIntoView({ block: "center" });
-    const rect = el.getBoundingClientRect();
-    const cx = Math.round(rect.left + Math.max(4, rect.width / 2));
-    const cy = Math.round(rect.top + Math.max(4, rect.height / 2));
-    const fromPt = document.elementFromPoint(cx, cy);
-    const hitEl = fromPt && el.contains(fromPt) ? fromPt : el;
-
-    const downMouse = {
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-      view: window,
-      detail: 1,
-      clientX: cx,
-      clientY: cy,
-      screenX: cx,
-      screenY: cy,
-      button: 0,
-      buttons: 1,
-    };
-    const upMouse = Object.assign({}, downMouse, { buttons: 0 });
-    const downPtr = Object.assign({}, downMouse, {
-      pointerId: 1,
-      pointerType: "mouse",
-      isPrimary: true,
-      width: 1,
-      height: 1,
-      pressure: 0.5,
-    });
-    const upPtr = Object.assign({}, upMouse, {
-      pointerId: 1,
-      pointerType: "mouse",
-      isPrimary: true,
-      width: 1,
-      height: 1,
-      pressure: 0,
-    });
-
-    try { hitEl.dispatchEvent(new PointerEvent("pointerover", downPtr)); } catch (_) {}
-    try { hitEl.dispatchEvent(new MouseEvent("mouseover", downMouse)); } catch (_) {}
-    try { hitEl.dispatchEvent(new PointerEvent("pointerdown", downPtr)); } catch (_) {}
-    try { hitEl.dispatchEvent(new MouseEvent("mousedown", downMouse)); } catch (_) {}
-    await sleep(45);
-    try { hitEl.dispatchEvent(new PointerEvent("pointerup", upPtr)); } catch (_) {}
-    try { hitEl.dispatchEvent(new MouseEvent("mouseup", upMouse)); } catch (_) {}
-    try { hitEl.dispatchEvent(new MouseEvent("click", upMouse)); } catch (_) { el.click(); }
-  }
 
   function findFocalContainer() {
     const articles = [...document.querySelectorAll("article")];
     for (const art of articles) {
       for (const t of art.querySelectorAll("time")) {
         const link = t.closest('a[href*="/status/"]');
-        if (link && (link.getAttribute("href") || "").includes(`/status/${tweetId}`)) {
-          return art;
-        }
+        if (link && (link.getAttribute("href") || "").includes(`/status/${tweetId}`)) return art;
       }
     }
     for (const art of articles) {
       if (art.getAttribute("tabindex") === "-1") return art;
     }
     for (const art of articles) {
-      const link = art.querySelector(`a[href*="/status/${tweetId}"]`);
-      if (link) return art;
+      if (art.querySelector(`a[href*="/status/${tweetId}"]`)) return art;
     }
     if (articles.length === 1) return articles[0];
     if (articles.length === 0) {
       const primary = document.querySelector('[data-testid="primaryColumn"], main');
-      if (primary && (primary.querySelector('[data-testid="removeBookmark"]') || primary.querySelector('[data-testid="bookmark"]'))) {
-        return primary;
-      }
+      if (primary && primary.querySelector('button[aria-label], [role="button"][aria-label]')) return primary;
     }
     return null;
   }
@@ -392,157 +409,119 @@ async function unbookmarkInStatusPage(tweetId) {
     return null;
   }
 
-  const deadline = Date.now() + 15000;
+  let last = null;
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (location.pathname.startsWith("/i/flow/login") || location.pathname === "/login") {
-      return { status: "abort", reason: "未偵測到 X 登入狀態，已立即中止" };
+      return { state: "abort", reason: "未偵測到 X 登入狀態，已立即中止" };
     }
     const bodyText = (document.body?.innerText || "").trim();
     if (rateRe.test(bodyText)) {
-      return { status: "abort", reason: "偵測到 X 限流或錯誤頁面（429），已立即中止" };
+      return { state: "abort", reason: "偵測到 X 限流或錯誤頁面（429），已立即中止" };
     }
-    const hasLoginBtn = Boolean(document.querySelector('[data-testid="loginButton"]'));
-    const hasSwitcher = Boolean(document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"]'));
-    const articleCount = document.querySelectorAll("article").length;
-    if (hasLoginBtn && !hasSwitcher && articleCount === 0) {
-      return { status: "abort", reason: "未偵測到 X 登入狀態，已立即中止" };
+    const toastEl = document.querySelector('[data-testid="toast"]');
+    if (!wantCoords && toastEl && toastOkRe.test(toastEl.innerText || "")) {
+      return { state: "not_bookmarked", label: "toast" };
     }
-
     const focal = findFocalContainer();
     if (focal) {
-      const removeBtn = findButton(focal, "removeBookmark", removeRe);
-      if (removeBtn) {
-        await sleep(400);
-        const curFocal = findFocalContainer() || focal;
-        const targetBtn = findButton(curFocal, "removeBookmark", removeRe);
-        if (!targetBtn) {
-          if (findButton(curFocal, "bookmark", addRe, removeRe)) {
-            return { status: "succeeded", reason: "already_unbookmarked" };
-          }
+      const rm = findButton(focal, "removeBookmark", removeRe);
+      if (rm) {
+        const label = (rm.getAttribute("aria-label") || "").trim();
+        if (!wantCoords) {
+          last = { state: "bookmarked", label };
+        } else {
+          rm.scrollIntoView({ block: "center" });
           await sleep(300);
-          continue;
+          const r = rm.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0) {
+            return { state: "bookmarked", label, x: r.left + r.width / 2, y: r.top + r.height / 2 };
+          }
         }
-        const beforeLabel = (targetBtn.getAttribute("aria-label") || "").trim();
-        const beforePressed = targetBtn.getAttribute("aria-pressed") || "";
-        const resStart = performance.getEntriesByType("resource").length;
-        await triggerClick(targetBtn);
-
-        const clickStart = Date.now();
-        const confirmDeadline = clickStart + 8000;
-        let retriedClick = false;
-        let clickedMenu = false;
-        while (Date.now() < confirmDeadline) {
-          const toastEl = document.querySelector('[data-testid="toast"]');
-          if (toastEl) {
-            const toastTxt = toastEl.innerText || "";
-            if (toastErrRe.test(toastTxt)) {
-              return { status: "abort", reason: "X 回報錯誤或限流提示，已立即中止" };
-            }
-            if (toastOkRe.test(toastTxt)) {
-              return { status: "succeeded", reason: "removed_toast" };
-            }
-          }
-          if (!clickedMenu) {
-            for (const item of document.querySelectorAll('[role="menuitem"], [role="menu"] button')) {
-              const itemTxt = (item.innerText || item.getAttribute("aria-label") || "").trim();
-              if (itemTxt && menuRemoveRe.test(itemTxt)) {
-                await triggerClick(item);
-                clickedMenu = true;
-                break;
-              }
-            }
-          }
-          if (targetBtn.isConnected) {
-            const curLabel = (targetBtn.getAttribute("aria-label") || "").trim();
-            const curPressed = targetBtn.getAttribute("aria-pressed") || "";
-            if ((curLabel && curLabel !== beforeLabel && !removeRe.test(curLabel)) || (beforePressed === "true" && curPressed === "false")) {
-              return { status: "succeeded", reason: "removed" };
-            }
-          }
-          const liveFocal = (curFocal && curFocal.isConnected) ? curFocal : (findFocalContainer() || document);
-          const nowAdd = findButton(liveFocal, "bookmark", addRe, removeRe);
-          const stillRemove = findButton(liveFocal, "removeBookmark", removeRe);
-          if (nowAdd || !stillRemove) {
-            return { status: "succeeded", reason: "removed" };
-          }
-          if (!retriedClick && !clickedMenu && Date.now() - clickStart >= 2000) {
-            retriedClick = true;
-            const btnNow = stillRemove || targetBtn;
-            const info = inspectElementProps(btnNow);
-            const rp = info.reactEntry;
-            const synthEv = {
-              isPrimary: true,
-              pointerId: 1,
-              pointerType: "mouse",
-              button: 0,
-              buttons: 0,
-              preventDefault() {},
-              stopPropagation() {},
-              persist() {},
-              currentTarget: rp ? rp.el : btnNow,
-              target: btnNow,
-              nativeEvent: new PointerEvent("pointerup", { bubbles: true, isPrimary: true, pointerId: 1, pointerType: "mouse" }),
-            };
-            let invoked = false;
-            if (rp) {
-              try {
-                if (typeof rp.props.onClick === "function") {
-                  rp.props.onClick(synthEv);
-                  invoked = true;
-                } else if (typeof rp.props.onPress === "function") {
-                  rp.props.onPress(synthEv);
-                  invoked = true;
-                } else if (typeof rp.props.onPointerUp === "function") {
-                  if (typeof rp.props.onPointerDown === "function") rp.props.onPointerDown(synthEv);
-                  rp.props.onPointerUp(synthEv);
-                  invoked = true;
-                }
-              } catch (_) {}
-            }
-            if (!invoked) {
-              try {
-                btnNow.focus();
-                btnNow.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, bubbles: true, cancelable: true }));
-                btnNow.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", code: "Enter", keyCode: 13, bubbles: true, cancelable: true }));
-              } catch (_) {}
-              await triggerClick(btnNow);
-            }
-          }
-          await sleep(250);
-        }
-        const liveAfter = (curFocal && curFocal.isConnected) ? curFocal : (findFocalContainer() || document);
-        const afterBtn = findButton(liveAfter, "removeBookmark", removeRe) || findButton(liveAfter, "bookmark", addRe, removeRe);
-        const afterLabel = afterBtn ? (afterBtn.getAttribute("aria-label") || "").trim() : "";
-        const propInfo = inspectElementProps(targetBtn);
-        const netHits = performance
-          .getEntriesByType("resource")
-          .slice(resStart)
-          .map((e) => e.name)
-          .filter((n) => /bookmark|graphql|api/i.test(n))
-          .map((n) => n.split("?")[0].split("/").slice(-1)[0])
-          .slice(0, 4);
-        return {
-          status: "failed",
-          reason: `點擊後未確認狀態切換 (vis=${document.visibilityState}, keys=${propInfo.ownKeys.join(",") || "none"}, fns=${propInfo.reactFnNames.join(",") || "none"}, net=${netHits.join(",") || "none"}, after=${afterLabel.slice(0, 28)})`,
-        };
-      }
-      const addBtn = findButton(focal, "bookmark", addRe, removeRe);
-      if (addBtn) {
-        return { status: "succeeded", reason: "already_unbookmarked" };
+      } else {
+        const add = findButton(focal, "bookmark", addRe, removeRe);
+        if (add) return { state: "not_bookmarked", label: (add.getAttribute("aria-label") || "").trim() };
       }
     } else if (deletedRe.test(bodyText)) {
-      return { status: "failed", reason: "貼文不存在或無法檢視" };
+      return { state: "failed", reason: "貼文不存在或無法檢視" };
     }
-
     await sleep(300);
   }
-  const artCnt = document.querySelectorAll("article").length;
-  const rmCnt = document.querySelectorAll('[data-testid="removeBookmark"]').length;
-  const addCnt = document.querySelectorAll('[data-testid="bookmark"]').length;
+  if (last) return last;
   return {
-    status: "failed",
-    reason: `載入逾時 (${location.pathname}, articles=${artCnt}, rm=${rmCnt}, add=${addCnt})`,
+    state: "failed",
+    reason: `載入逾時 (${location.pathname}, articles=${document.querySelectorAll("article").length})`,
   };
+}
+
+async function runInTab(tabId, func, args) {
+  const exec = () => chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", func, args });
+  let res;
+  try {
+    res = await exec();
+  } catch (_) {
+    await new Promise((r) => setTimeout(r, 1000));
+    res = await exec();
+  }
+  return res?.[0]?.result;
+}
+
+let debuggerTabId = null;
+
+async function ensureDebugger(tabId) {
+  if (debuggerTabId === tabId) return;
+  await chrome.debugger.attach({ tabId }, "1.3");
+  debuggerTabId = tabId;
+  try {
+    await chrome.debugger.sendCommand({ tabId }, "Emulation.setFocusEmulationEnabled", { enabled: true });
+  } catch (_) {}
+}
+
+async function detachDebugger() {
+  if (debuggerTabId === null) return;
+  const tabId = debuggerTabId;
+  debuggerTabId = null;
+  try {
+    await chrome.debugger.detach({ tabId });
+  } catch (_) {}
+}
+
+// Real (isTrusted) mouse click via Chrome DevTools Protocol.
+async function trustedClick(tabId, x, y) {
+  const send = (params) => chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", params);
+  await send({ type: "mouseMoved", x, y });
+  await send({ type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
+  await new Promise((r) => setTimeout(r, 60));
+  await send({ type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 });
+}
+
+function statusUrlFor(item) {
+  const rawUrl = String(item.url || "").trim();
+  return /^https:\/\/(?:x|twitter)\.com\/.+\/status\/\d+/.test(rawUrl) && rawUrl.includes(`/status/${item.tweet_id}`)
+    ? rawUrl.replace(/^https:\/\/twitter\.com/, "https://x.com")
+    : `https://x.com/i/status/${item.tweet_id}`;
+}
+
+async function unbookmarkViaDebugger(tabId, item) {
+  await navigateTabAndWait(tabId, statusUrlFor(item), item.tweet_id, 20000);
+  const pre = await runInTab(tabId, probeBookmark, [item.tweet_id, 15000, true]);
+  if (!pre) return { status: "failed", reason: "無回傳結果" };
+  if (pre.state === "abort") return { status: "abort", reason: pre.reason };
+  if (pre.state === "not_bookmarked") return { status: "succeeded", reason: "already_unbookmarked" };
+  if (pre.state !== "bookmarked") return { status: "failed", reason: pre.reason || "找不到書籤按鈕" };
+
+  try {
+    await ensureDebugger(tabId);
+    await trustedClick(tabId, pre.x, pre.y);
+  } catch (err) {
+    return { status: "failed", reason: `真實點擊失敗：${err.message || err}` };
+  }
+
+  const post = await runInTab(tabId, probeBookmark, [item.tweet_id, 6000, false]);
+  if (!post) return { status: "failed", reason: "點擊後無回傳結果" };
+  if (post.state === "abort") return { status: "abort", reason: post.reason };
+  if (post.state === "not_bookmarked") return { status: "succeeded", reason: "removed_click" };
+  return { status: "failed", reason: `真實點擊後仍未切換 (${post.label || post.reason || ""})` };
 }
 
 stopUnbookmarkBtn.addEventListener("click", () => {
@@ -577,6 +556,8 @@ unbookmarkBtn.addEventListener("click", async () => {
   let alreadyCount = 0;
   const failedList = [];
   let abortReason = "";
+  let apiBroken = false;
+  let apiFallbackReason = "";
 
   try {
     const qData = await proxyRequest(serverUrl, `/api/unbookmark-queue?limit=${batchLimit}`);
@@ -587,43 +568,40 @@ unbookmarkBtn.addEventListener("click", async () => {
     }
 
     bgTab = await chrome.tabs.create({ url: "about:blank", active: false });
+    setStatus("開啟 X 背景分頁中...");
+    await navigateTabAndWait(bgTab.id, "https://x.com/home", null, 20000);
 
     for (let i = 0; i < items.length; i++) {
       if (unbookmarkStopRequested) break;
       const item = items[i];
-      setStatus(`取消收藏中 (${i + 1}/${items.length})：${item.tweet_id}...`);
+      const modeLabel = apiBroken ? "真實點擊" : "API";
+      setStatus(`取消收藏中 (${i + 1}/${items.length})［${modeLabel}］：${item.tweet_id}...`);
 
-      const rawUrl = String(item.url || "").trim();
-      const targetUrl =
-        /^https:\/\/(?:x|twitter)\.com\/.+\/status\/\d+/.test(rawUrl) && rawUrl.includes(`/status/${item.tweet_id}`)
-          ? rawUrl.replace(/^https:\/\/twitter\.com/, "https://x.com")
-          : `https://x.com/i/status/${item.tweet_id}`;
-
-      await navigateTabAndWait(bgTab.id, targetUrl, item.tweet_id, 20000);
-      if (unbookmarkStopRequested) break;
-
-      let stepRes;
-      try {
-        let execRes;
+      let stepRes = null;
+      if (!apiBroken) {
         try {
-          execRes = await chrome.scripting.executeScript({
-            target: { tabId: bgTab.id },
-            world: "MAIN",
-            func: unbookmarkInStatusPage,
-            args: [item.tweet_id],
-          });
-        } catch (firstErr) {
-          await new Promise((r) => setTimeout(r, 1000));
-          execRes = await chrome.scripting.executeScript({
-            target: { tabId: bgTab.id },
-            world: "MAIN",
-            func: unbookmarkInStatusPage,
-            args: [item.tweet_id],
-          });
+          stepRes = await runInTab(bgTab.id, unbookmarkViaGraphQL, [
+            item.tweet_id,
+            FALLBACK_DELETE_BOOKMARK_QID,
+            FALLBACK_WEB_BEARER,
+          ]);
+        } catch (err) {
+          stepRes = { status: "fallback", reason: err.message || "API 腳本執行失敗" };
         }
-        stepRes = execRes?.[0]?.result || { status: "failed", reason: "無回傳結果" };
-      } catch (err) {
-        stepRes = { status: "failed", reason: err.message || "腳本執行失敗" };
+        if (!stepRes) stepRes = { status: "fallback", reason: "API 無回傳結果" };
+        if (stepRes.status === "fallback") {
+          apiBroken = true;
+          apiFallbackReason = stepRes.reason || "";
+        }
+      }
+      if (apiBroken && (!stepRes || stepRes.status === "fallback")) {
+        if (unbookmarkStopRequested) break;
+        setStatus(`取消收藏中 (${i + 1}/${items.length})［真實點擊］：${item.tweet_id}...`);
+        try {
+          stepRes = await unbookmarkViaDebugger(bgTab.id, item);
+        } catch (err) {
+          stepRes = { status: "failed", reason: err.message || "真實點擊流程失敗" };
+        }
       }
 
       if (stepRes.status === "succeeded") {
@@ -635,6 +613,10 @@ unbookmarkBtn.addEventListener("click", async () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ succeeded: [item.tweet_id], failed: [] }),
         });
+        if (typeof stepRes.rateRemaining === "number" && !Number.isNaN(stepRes.rateRemaining) && stepRes.rateRemaining <= 1) {
+          abortReason = `X API 剩餘額度 ${stepRes.rateRemaining}，為避免限流已暫停`;
+          break;
+        }
       } else if (stepRes.status === "abort") {
         abortReason = stepRes.reason || "觸發風控保護";
         failedList.push({ tweet_id: item.tweet_id, reason: abortReason });
@@ -663,20 +645,22 @@ unbookmarkBtn.addEventListener("click", async () => {
     const remaining = await refreshQueueCount();
     const remLabel = remaining >= 0 ? `｜剩餘佇列 ${remaining} 則` : "";
     const okDetail = succeededCount > 0 ? `（實刪 ${removedCount} / 原已取消 ${alreadyCount}）` : "";
+    const modeText = apiBroken ? `\n模式：API 不可用，已改用真實點擊（${apiFallbackReason.slice(0, 60)}）` : "\n模式：GraphQL API";
     const detailText = failedList.length
       ? "\n失敗原因：\n" + failedList.slice(0, 3).map((f) => `- ${f.tweet_id}: ${f.reason}`).join("\n")
       : "";
+    const summary = `成功 ${succeededCount} 則${okDetail}｜失敗 ${failedList.length} 則${remLabel}${modeText}${detailText}`;
     if (abortReason) {
-      setStatus(`${abortReason}\n本次成功 ${succeededCount} 則${okDetail}｜失敗 ${failedList.length} 則${remLabel}${detailText}`, "err");
+      setStatus(`${abortReason}\n${summary}`, "err");
     } else if (unbookmarkStopRequested) {
-      setStatus(`已手動停止\n本次成功 ${succeededCount} 則${okDetail}｜失敗 ${failedList.length} 則${remLabel}${detailText}`, "ok");
+      setStatus(`已手動停止\n${summary}`, "ok");
     } else {
-      const cls = succeededCount === 0 && failedList.length > 0 ? "err" : "ok";
-      setStatus(`批次取消收藏完成\n成功 ${succeededCount} 則${okDetail}｜失敗 ${failedList.length} 則${remLabel}${detailText}`, cls);
+      setStatus(`批次取消收藏完成\n${summary}`, succeededCount === 0 && failedList.length > 0 ? "err" : "ok");
     }
   } catch (e) {
     setStatus(`取消收藏錯誤：${e.message || String(e)}`, "err");
   } finally {
+    await detachDebugger();
     if (bgTab && bgTab.id) {
       try {
         await chrome.tabs.remove(bgTab.id);
