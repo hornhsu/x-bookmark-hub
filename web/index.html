@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="zh-Hant" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>X Bookmark Hub｜本機書籤知識庫</title>
+  <style>
+    :root {
+      --bg: #0e1117; --card: #161b24; --elev: #202634; --line: #2a3142;
+      --fg: #e9eef7; --dim: #92a0b8; --acc: #4ea1ff; --h3: #ff8f4c; --danger: #ff6b6b; --ok: #51cf66;
+    }
+    [data-theme="light"] {
+      --bg: #f4f6fb; --card: #ffffff; --elev: #eceff7; --line: #d6deec;
+      --fg: #171b24; --dim: #5d677c; --acc: #2b5ce0; --h3: #d9480f; --danger: #e03131; --ok: #2f9e44;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 14.5px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", sans-serif; }
+    header { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); padding: 14px 20px; }
+    .wrap { max-width: 1420px; margin: 0 auto; }
+    .top { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    h1 { margin: 0; font-size: 1.28rem; }
+    .stats { font-size: 0.83rem; color: var(--dim); margin-top: 2px; }
+    .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    input[type="search"], select, button.btn {
+      background: var(--elev); color: var(--fg); border: 1px solid var(--line); border-radius: 9px; padding: 7px 11px; font-size: 0.86rem;
+    }
+    input[type="search"] { width: min(330px, 85vw); }
+    button.btn { cursor: pointer; }
+    button.btn.primary { background: var(--acc); color: #051324; border-color: var(--acc); font-weight: 600; }
+    .row-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+    .chip { background: var(--elev); color: var(--dim); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 0.78rem; cursor: pointer; }
+    .chip.on { background: var(--acc); color: #041222; border-color: var(--acc); font-weight: 600; }
+    .chip.h3.on { background: var(--h3); color: #fff; border-color: var(--h3); }
+    main { max-width: 1420px; margin: 0 auto; padding: 18px 20px 60px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; margin-bottom: 14px; font-size: 0.85rem; color: var(--dim); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 16px; }
+    .grid.masonry { display: block; columns: 350px; column-gap: 16px; }
+    .grid.masonry .card { break-inside: avoid; margin-bottom: 16px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+    .card.pending { border-color: var(--danger); opacity: 0.86; }
+    .media { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 2px; background: #05070a; }
+    .media img { width: 100%; max-height: 250px; object-fit: cover; display: block; cursor: zoom-in; }
+    .body { padding: 13px 15px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+    .meta { display: flex; flex-wrap: wrap; gap: 7px; font-size: 0.78rem; color: var(--dim); align-items: center; }
+    .badge { background: color-mix(in srgb, var(--acc) 18%, transparent); color: var(--acc); border-radius: 6px; padding: 1px 7px; font-size: 0.74rem; font-weight: 600; }
+    .badge.v { background: color-mix(in srgb, var(--h3) 20%, transparent); color: var(--h3); }
+    .badge.p { background: color-mix(in srgb, var(--danger) 20%, transparent); color: var(--danger); }
+    .title { margin: 0; font-size: 0.99rem; line-height: 1.4; }
+    .sum { margin: 0; font-size: 0.86rem; color: var(--dim); }
+    .txt { white-space: pre-wrap; word-break: break-word; font-size: 0.87rem; }
+    .q { border-left: 3px solid var(--acc); padding: 6px 10px; background: var(--elev); font-size: 0.81rem; color: var(--dim); white-space: pre-wrap; border-radius: 0 6px 6px 0; }
+    .tags { display: flex; flex-wrap: wrap; gap: 5px; }
+    .tag { background: var(--elev); border: 1px solid var(--line); border-radius: 6px; padding: 1px 7px; font-size: 0.74rem; color: var(--dim); }
+    .foot { margin-top: auto; padding-top: 8px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 0.8rem; }
+    .mini-btn { background: transparent; color: var(--dim); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; font-size: 0.75rem; cursor: pointer; }
+    .mini-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
+    .mini-btn.restore { border-color: var(--ok); color: var(--ok); }
+    a { color: var(--acc); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .pager { display: flex; justify-content: center; gap: 10px; margin-top: 24px; align-items: center; }
+    .toast { position: fixed; bottom: 20px; right: 20px; background: var(--elev); border: 1px solid var(--acc); color: var(--fg); padding: 10px 14px; border-radius: 10px; font-size: 0.85rem; display: none; z-index: 50; max-width: 420px; }
+    .lb { position: fixed; inset: 0; background: rgba(0, 0, 0, .88); display: none; align-items: center; justify-content: center; z-index: 100; padding: 24px; }
+    .lb.open { display: flex; }
+    .lb img { max-width: 94vw; max-height: 90vh; border-radius: 8px; }
+  </style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <h1>X Bookmark Hub</h1>
+        <div class="stats" id="statsLine">載入統計中...</div>
+      </div>
+      <div class="controls">
+        <input type="search" id="searchInput" placeholder="FTS5 全文搜尋（關鍵字、模型、作者）..." />
+        <select id="sinceSelect">
+          <option value="">全部時間</option>
+          <option value="6m">近半年</option>
+          <option value="30d">近 30 天</option>
+        </select>
+        <select id="statusSelect">
+          <option value="active">有效書籤</option>
+          <option value="pending_unbookmark">待取消收藏</option>
+          <option value="all">全部狀態</option>
+        </select>
+        <select id="sortSelect">
+          <option value="newest">最新貼文</option>
+          <option value="likes">最多讚</option>
+          <option value="bookmark">收藏順序</option>
+          <option value="oldest">最舊貼文</option>
+        </select>
+        <button class="btn" id="layoutBtn" type="button">切換瀑布流</button>
+        <button class="btn" id="themeBtn" type="button">深淺色</button>
+      </div>
+    </div>
+    <div class="row-chips" id="catChips"></div>
+    <div class="row-chips" id="kindChips"></div>
+    <div class="row-chips" id="modelChips"></div>
+  </div>
+</header>
+
+<main>
+  <div class="toolbar">
+    <span id="resultInfo">查詢中...</span>
+    <div class="controls">
+      <button class="btn" id="classifyBtn" type="button">執行規則分類</button>
+      <button class="btn primary" id="exportHtmlBtn" type="button">一鍵匯出離線 HTML</button>
+      <button class="btn" id="exportObsBtn" type="button">一鍵匯出 Obsidian Vault</button>
+    </div>
+  </div>
+  <div class="grid" id="grid"></div>
+  <div class="pager">
+    <button class="btn" id="prevBtn" type="button">上一頁</button>
+    <span id="pageInfo"></span>
+    <button class="btn" id="nextBtn" type="button">下一頁</button>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+<div class="lb" id="lb"><img id="lbImg" src="" alt="預覽大圖" /></div>
+
+<script>
+const KIND_LABELS = { tutorial: "教學／工作流", showcase: "作品／展示", review: "評測／對比", news: "發布／新聞", question: "提問" };
+const state = { q: "", category: "", kind: "", model: "", sincePreset: "", status: "active", sort: "newest", masonry: false, limit: 60, offset: 0, total: 0 };
+
+const esc = s => String(s || "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" })[c]);
+
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.style.display = "block";
+  clearTimeout(window.__toastT);
+  window.__toastT = setTimeout(() => { el.style.display = "none"; }, 4500);
+}
+
+function computeSince(preset) {
+  if (!preset) return "";
+  const d = new Date();
+  if (preset === "30d") d.setDate(d.getDate() - 30);
+  if (preset === "6m") d.setMonth(d.getMonth() - 6);
+  return d.toISOString().slice(0, 10);
+}
+
+async function fetchStats() {
+  const res = await fetch("/api/stats");
+  const s = await res.json();
+  document.getElementById("statsLine").textContent =
+    `總書籤 ${s.total} 則｜有內文 ${s.with_text} 則｜本機有圖 ${s.with_local_media} 則｜待取消 ${s.pending_unbookmark} 則｜時間 ${s.earliest ? s.earliest.slice(0,10) : "-"} ～ ${s.latest ? s.latest.slice(0,10) : "-"}`;
+}
+
+function renderFacets(facets) {
+  const cats = facets.categories || [];
+  const kinds = (facets.kinds || []).filter(k => k.name !== "未指定");
+  const models = facets.models || [];
+
+  document.getElementById("catChips").innerHTML = `<span class="stats">分類：</span>` +
+    `<button class="chip ${state.category === "" ? "on" : ""}" data-type="category" data-val="">全部</button>` +
+    cats.map(c => {
+      const val = c.name === "未分類" ? "__uncategorized__" : c.name;
+      return `<button class="chip ${state.category === val ? "on" : ""}" data-type="category" data-val="${esc(val)}">${esc(c.name)} (${c.count})</button>`;
+    }).join("");
+
+  document.getElementById("kindChips").innerHTML = kinds.length ? `<span class="stats">類型：</span>` +
+    `<button class="chip ${state.kind === "" ? "on" : ""}" data-type="kind" data-val="">全部</button>` +
+    kinds.map(k => `<button class="chip ${state.kind === k.name ? "on" : ""}" data-type="kind" data-val="${esc(k.name)}">${esc(KIND_LABELS[k.name] || k.name)} (${k.count})</button>`).join("") : "";
+
+  document.getElementById("modelChips").innerHTML = models.length ? `<span class="stats">模型：</span>` +
+    models.slice(0, 22).map(m => `<button class="chip h3 ${state.model === m.name ? "on" : ""}" data-type="model" data-val="${esc(m.name)}">${esc(m.name)} (${m.count})</button>`).join("") : "";
+
+  document.querySelectorAll("[data-type]").forEach(btn => {
+    btn.onclick = () => {
+      const t = btn.dataset.type, v = btn.dataset.val;
+      state[t] = (state[t] === v && v !== "") ? "" : v;
+      state.offset = 0;
+      loadBookmarks();
+    };
+  });
+}
+
+async function loadBookmarks() {
+  const params = new URLSearchParams({
+    q: state.q,
+    category: state.category,
+    kind: state.kind,
+    model: state.model,
+    since: computeSince(state.sincePreset),
+    status: state.status,
+    sort: state.sort,
+    limit: String(state.limit),
+    offset: String(state.offset),
+  });
+  const res = await fetch(`/api/bookmarks?${params.toString()}`);
+  const data = await res.json();
+  state.total = data.total || 0;
+  renderFacets(data.facets || {});
+
+  const grid = document.getElementById("grid");
+  grid.className = state.masonry ? "grid masonry" : "grid";
+  const start = state.total ? state.offset + 1 : 0;
+  const end = Math.min(state.offset + state.limit, state.total);
+  document.getElementById("resultInfo").textContent = `顯示第 ${start}–${end} 則，共符合 ${state.total} 則`;
+  document.getElementById("pageInfo").textContent = `第 ${Math.floor(state.offset / state.limit) + 1} / ${Math.max(1, Math.ceil(state.total / state.limit))} 頁`;
+  document.getElementById("prevBtn").disabled = state.offset <= 0;
+  document.getElementById("nextBtn").disabled = state.offset + state.limit >= state.total;
+
+  grid.innerHTML = (data.items || []).map(x => {
+    const mediaList = (x.local_media && x.local_media.length) ? x.local_media.map(m => m.startsWith("http") ? m : `/${m}`) : (x.media_urls || []);
+    const isPending = x.sync_status === "pending_unbookmark";
+    const statusBtn = isPending
+      ? `<button class="mini-btn restore" data-status-id="${esc(x.tweet_id)}" data-next="active">還原保留</button>`
+      : `<button class="mini-btn danger" data-status-id="${esc(x.tweet_id)}" data-next="pending_unbookmark">標記取消收藏</button>`;
+    return `
+      <article class="card ${isPending ? "pending" : ""}">
+        ${mediaList.length ? `<div class="media">${mediaList.slice(0, 4).map(src => `<img loading="lazy" src="${esc(src)}" alt="" onerror="this.style.display='none'">`).join("")}</div>` : ""}
+        <div class="body">
+          <div class="meta">
+            <span class="badge">${esc(x.category || "未分類")}</span>
+            ${x.content_kind ? `<span class="tag">${esc(KIND_LABELS[x.content_kind] || x.content_kind)}</span>` : ""}
+            ${x.has_video ? `<span class="badge v">▶ 影片</span>` : ""}
+            ${isPending ? `<span class="badge p">待取消收藏</span>` : ""}
+            <span>${esc((x.created_at || "").slice(0, 10))}</span>
+            ${x.like_count ? `<span>♥ ${x.like_count}</span>` : ""}
+          </div>
+          ${x.title ? `<h2 class="title">${esc(x.title)}</h2>` : ""}
+          ${x.summary ? `<p class="sum">${esc(x.summary)}</p>` : ""}
+          <div class="txt">${esc(x.text || "（僅有連結／尚待補齊內文，可用增量重掃或 cli.py enrich 補齊）")}</div>
+          ${x.quoted_text ? `<div class="q">${x.quoted_author ? esc(x.quoted_author) + "：" : ""}${esc(x.quoted_text)}</div>` : ""}
+          <div class="tags">${(x.models || []).map(m => `<span class="tag">${esc(m)}</span>`).join("")} <span class="tag">${esc(x.author_handle || "")}</span></div>
+          <div class="foot">
+            ${statusBtn}
+            <a href="${esc(x.url)}" target="_blank" rel="noopener">前往 X 原文 ↗</a>
+          </div>
+        </div>
+      </article>
+    `;
+  }).join("");
+
+  grid.querySelectorAll("img").forEach(img => {
+    img.onclick = () => {
+      document.getElementById("lbImg").src = img.src;
+      document.getElementById("lb").classList.add("open");
+    };
+  });
+
+  grid.querySelectorAll("[data-status-id]").forEach(btn => {
+    btn.onclick = async () => {
+      const tid = btn.dataset.statusId;
+      const next = btn.dataset.next;
+      await fetch(`/api/bookmarks/${encodeURIComponent(tid)}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sync_status: next }),
+      });
+      await Promise.all([fetchStats(), loadBookmarks()]);
+    };
+  });
+}
+
+let searchTimer = null;
+document.getElementById("searchInput").oninput = e => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { state.q = e.target.value; state.offset = 0; loadBookmarks(); }, 220);
+};
+document.getElementById("sinceSelect").onchange = e => { state.sincePreset = e.target.value; state.offset = 0; loadBookmarks(); };
+document.getElementById("statusSelect").onchange = e => { state.status = e.target.value; state.offset = 0; loadBookmarks(); };
+document.getElementById("sortSelect").onchange = e => { state.sort = e.target.value; state.offset = 0; loadBookmarks(); };
+document.getElementById("layoutBtn").onclick = () => { state.masonry = !state.masonry; loadBookmarks(); };
+document.getElementById("themeBtn").onclick = () => { const r = document.documentElement; r.dataset.theme = r.dataset.theme === "dark" ? "light" : "dark"; };
+document.getElementById("prevBtn").onclick = () => { state.offset = Math.max(0, state.offset - state.limit); loadBookmarks(); };
+document.getElementById("nextBtn").onclick = () => { if (state.offset + state.limit < state.total) { state.offset += state.limit; loadBookmarks(); } };
+
+document.getElementById("classifyBtn").onclick = async () => {
+  toast("正在執行規則分類...");
+  const res = await fetch("/api/classify", { method: "POST" });
+  const r = await res.json();
+  toast(`規則分類完成：更新 ${r.updated || 0} 則`);
+  await Promise.all([fetchStats(), loadBookmarks()]);
+};
+
+async function triggerExport(fmt) {
+  toast(`正在匯出 ${fmt.toUpperCase()}...`);
+  const res = await fetch("/api/export", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      format: fmt,
+      q: state.q,
+      category: state.category,
+      kind: state.kind,
+      model: state.model,
+      since: computeSince(state.sincePreset),
+      status: state.status,
+    }),
+  });
+  const r = await res.json();
+  if (r.download_url) {
+    toast(`匯出完成（${r.count} 則）：${r.path}`);
+    window.open(r.download_url, "_blank");
+  } else {
+    toast(`Obsidian Vault 匯出完成（${r.notes} 篇筆記）：${r.path}`);
+  }
+}
+
+document.getElementById("exportHtmlBtn").onclick = () => triggerExport("html");
+document.getElementById("exportObsBtn").onclick = () => triggerExport("obsidian");
+document.getElementById("lb").onclick = () => document.getElementById("lb").classList.remove("open");
+document.addEventListener("keydown", e => { if (e.key === "Escape") document.getElementById("lb").classList.remove("open"); });
+
+fetchStats();
+loadBookmarks();
+</script>
+</body>
+</html>

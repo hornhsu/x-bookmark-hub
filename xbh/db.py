@@ -470,19 +470,23 @@ def query_bookmarks(
         where_clauses.append("b.content_kind = ?")
         params.append(content_kind)
 
-    fts_expr = _build_fts_query(search)
+    search_clean = (search or "").strip()
     join_sql = ""
-    if fts_expr:
-        if has_fts(conn):
+    if search_clean:
+        tokens = [t for t in re.split(r"\s+", search_clean) if t]
+        has_cjk = any(re.search(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]", t) for t in tokens)
+        if has_fts(conn) and not has_cjk:
+            fts_expr = _build_fts_query(search_clean)
             join_sql = "JOIN bookmarks_fts f ON f.rowid = b.id"
             where_clauses.append("bookmarks_fts MATCH ?")
             params.append(fts_expr)
         else:
-            like = f"%{search.strip()}%"
-            where_clauses.append(
-                "(b.title LIKE ? OR b.summary LIKE ? OR b.text LIKE ? OR b.quoted_text LIKE ? OR b.author_handle LIKE ? OR b.models LIKE ?)"
-            )
-            params.extend([like] * 6)
+            for tok in tokens:
+                like = f"%{tok}%"
+                where_clauses.append(
+                    "(b.title LIKE ? OR b.summary LIKE ? OR b.text LIKE ? OR b.quoted_text LIKE ? OR b.author_name LIKE ? OR b.author_handle LIKE ? OR b.models LIKE ? OR b.tags LIKE ?)"
+                )
+                params.extend([like] * 8)
 
     where_sql = " WHERE " + " AND ".join(where_clauses) if where_clauses else ""
 
