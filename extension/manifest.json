@@ -1,13 +1,20 @@
 {
   "manifest_version": 3,
   "name": "X Bookmark Hub",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Incremental X/Twitter bookmark sync and management extension for X Bookmark Hub.",
   "permissions": ["activeTab", "scripting", "storage", "tabs"],
+  "background": {
+    "service_worker": "background.js"
+  },
   "host_permissions": [
     "https://x.com/*",
-    "http://localhost:*/*",
-    "http://127.0.0.1:*/*"
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
   ],
   "action": {
     "default_popup": "popup.html"

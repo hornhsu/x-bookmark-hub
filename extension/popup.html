@@ -72,8 +72,14 @@
   <h1>X Bookmark Hub</h1>
   <div class="sub">支援 x.com/i/history 與增量同步</div>
 
-  <label for="serverUrl">本機 Server 位址</label>
-  <input id="serverUrl" type="text" value="http://127.0.0.1:7799" />
+  <label for="serverUrl">Server 位址（本機或遠端 VM / Tailscale）</label>
+  <div style="display:flex; gap:6px; align-items:center;">
+    <input id="serverUrl" type="text" value="http://127.0.0.1:7799" />
+    <button id="testConnBtn" class="mini-btn" type="button" style="padding:7px 9px;">測試連線</button>
+  </div>
+
+  <label for="apiKeyInput">API Key（選填，遠端伺服器驗證用）</label>
+  <input id="apiKeyInput" type="password" placeholder="留空表示不啟用金鑰驗證" />
 
   <label for="modeSelect">同步模式</label>
   <select id="modeSelect">

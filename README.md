@@ -80,8 +80,8 @@ python cli.py import-json "C:\path\to\bookmarks_filtered.json" --copy-assets-fro
 
 - **Phase 1（已完成）**：MV3 擴充（相容 `/i/history` DOM、邊捲邊傳、增量同步）、`FxTwitter` 補完器、本機圖片快取、規則分類 + 選配 LLM 摘要。
 - **Phase 2（已完成）**：內建 Web UI（FTS5 毫秒搜尋、模型 × 類型雙維度篩選、瀑布流／卡片切換、Lightbox 放大）、一鍵匯出離線 HTML 與按月歸檔 Obsidian Vault。
-- **Phase 3（規劃中，見 `HANDOFF.md`）**：網頁勾選「待取消收藏」清單 → 擴充功能低風險限速執行批次取消收藏。
-- **Phase 4（規劃中，見 `HANDOFF.md`）**：VM / Docker 部署、MV3 Service Worker 跨域代理與 API Token 驗證。
+- **Phase 3（已完成）**：網頁多選與待取消收藏佇列檢視 → Chrome 擴充功能單背景分頁低風險限速（隨機 2.5–5 秒延遲、429／未登入自動中止）執行雙向取消收藏同步。
+- **Phase 4（已完成）**：MV3 Service Worker (`background.js`) 跨域代理（解決遠端 HTTP Mixed Content）、全端點 `XBH_API_KEY` 驗證、`Dockerfile` / `docker-compose.yml` 與 [遠端部署指南](docs/DEPLOY.md)。
 
 ## 授權
 

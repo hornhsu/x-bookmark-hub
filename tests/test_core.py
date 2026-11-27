@@ -388,6 +388,99 @@ class CoreTests(unittest.TestCase):
             srv.shutdown()
             srv.server_close()
 
+    def test_phase4_api_key_auth_and_health(self) -> None:
+        srv_db = self.root / "srv4" / "hub.db"
+        exports_dir = self.root / "srv4_exports"
+        srv = create_server("127.0.0.1", 0, srv_db, api_key="test-secret-key", exports_dir=exports_dir)
+        (srv.media_dir / "sample.jpg").write_bytes(b"imgdata")
+        (exports_dir / "sample.html").write_text("<html>ok</html>", encoding="utf-8")
+
+        port = srv.server_address[1]
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        try:
+            base = f"http://127.0.0.1:{port}"
+
+            # Public endpoints: / and /api/health
+            with urllib.request.urlopen(f"{base}/") as resp:
+                self.assertEqual(resp.status, 200)
+            with urllib.request.urlopen(f"{base}/api/health") as resp:
+                health = json.loads(resp.read().decode("utf-8"))
+                self.assertEqual(health, {"status": "ok", "auth_required": True})
+
+            # Unauthenticated & wrong-key requests should return 401
+            protected_gets = [
+                "/api/stats",
+                "/api/bookmarks",
+                "/api/bookmarks/known-ids",
+                "/api/unbookmark-queue",
+                "/media/sample.jpg",
+                "/exports/sample.html",
+            ]
+            for path in protected_gets:
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    urllib.request.urlopen(f"{base}{path}")
+                self.assertEqual(ctx.exception.code, 401, f"Expected 401 for {path}")
+
+                bad_req = urllib.request.Request(f"{base}{path}", headers={"X-API-Key": "wrong-key"})
+                with self.assertRaises(urllib.error.HTTPError) as ctx2:
+                    urllib.request.urlopen(bad_req)
+                self.assertEqual(ctx2.exception.code, 401, f"Expected 401 for wrong key on {path}")
+
+            protected_posts = [
+                ("POST", "/api/bookmarks", [{"tweet_id": "2125546356609790433", "text": "Auth test"}]),
+                ("POST", "/api/bookmarks/batch-status", {"tweet_ids": ["2125546356609790433"], "sync_status": "active"}),
+                ("POST", "/api/unbookmark-ack", {"succeeded": [], "failed": []}),
+                ("PATCH", "/api/bookmarks/2125546356609790433/status", {"sync_status": "active"}),
+            ]
+            for method, path, payload in protected_posts:
+                req = urllib.request.Request(
+                    f"{base}{path}",
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method=method,
+                )
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    urllib.request.urlopen(req)
+                self.assertEqual(ctx.exception.code, 401, f"Expected 401 for {method} {path}")
+
+            # Valid X-API-Key succeeds on POST, GET, PATCH
+            ok_headers = {"Content-Type": "application/json", "X-API-Key": "test-secret-key"}
+            post_req = urllib.request.Request(
+                f"{base}/api/bookmarks",
+                data=json.dumps([{"tweet_id": "2125546356609790433", "text": "Auth test"}]).encode("utf-8"),
+                headers=ok_headers,
+                method="POST",
+            )
+            with urllib.request.urlopen(post_req) as resp:
+                self.assertEqual(json.loads(resp.read().decode("utf-8"))["inserted"], 1)
+
+            patch_req = urllib.request.Request(
+                f"{base}/api/bookmarks/2125546356609790433/status",
+                data=json.dumps({"sync_status": "pending_unbookmark"}).encode("utf-8"),
+                headers=ok_headers,
+                method="PATCH",
+            )
+            with urllib.request.urlopen(patch_req) as resp:
+                self.assertEqual(json.loads(resp.read().decode("utf-8"))["updated"], 1)
+
+            # Valid Authorization: Bearer header succeeds on GET /api/stats
+            bearer_req = urllib.request.Request(
+                f"{base}/api/stats",
+                headers={"Authorization": "Bearer test-secret-key"},
+            )
+            with urllib.request.urlopen(bearer_req) as resp:
+                self.assertEqual(json.loads(resp.read().decode("utf-8"))["pending_unbookmark"], 1)
+
+            # Valid ?api_key=... succeeds on /media and /exports
+            with urllib.request.urlopen(f"{base}/media/sample.jpg?api_key=test-secret-key") as resp:
+                self.assertEqual(resp.read(), b"imgdata")
+            with urllib.request.urlopen(f"{base}/exports/sample.html?api_key=test-secret-key") as resp:
+                self.assertEqual(resp.read().decode("utf-8"), "<html>ok</html>")
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()

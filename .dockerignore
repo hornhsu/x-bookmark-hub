@@ -1,0 +1,12 @@
+.git
+data
+exports
+*.db
+*.db-*
+.env
+.env.*
+__pycache__
+*.pyc
+tests
+extension
+.agents

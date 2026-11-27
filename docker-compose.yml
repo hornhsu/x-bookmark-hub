@@ -1,0 +1,17 @@
+services:
+  xbh:
+    build: .
+    container_name: x-bookmark-hub
+    restart: unless-stopped
+    ports:
+      - "${XBH_BIND_HOST:-127.0.0.1}:${XBH_PORT:-7799}:7799"
+    environment:
+      XBH_API_KEY: "${XBH_API_KEY:-}"
+      XBH_HOST: "0.0.0.0"
+      XBH_PORT: "7799"
+      XBH_DB_PATH: "/app/data/bookmarks.db"
+      XBH_EXPORTS_DIR: "/app/exports"
+      TZ: "Asia/Taipei"
+    volumes:
+      - ./data:/app/data
+      - ./exports:/app/exports

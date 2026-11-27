@@ -183,18 +183,44 @@
     }
   }
 
+  async function proxyRequest(path, { method = "GET", headers = {}, body = undefined } = {}) {
+    const res = await new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage(
+        {
+          source: "xbh-proxy",
+          action: "fetch",
+          url: `${SERVER}${path}`,
+          method,
+          headers,
+          body,
+          apiKey: cfg.apiKey || "",
+        },
+        (resp) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          resolve(resp);
+        }
+      );
+    });
+    if (!res) throw new Error(`無法透過背景代理連線到 Server (${SERVER})`);
+    if (res.status === 401) {
+      throw new Error("Server 回傳 401 Unauthorized，請在擴充功能填入正確的 API Key");
+    }
+    if (!res.ok) {
+      throw new Error(res.error ? `無法連線到 Server (${SERVER})：${res.error}` : `Server ${res.status}: ${res.text || ""}`);
+    }
+    return res.data;
+  }
+
   async function postBatch(batch) {
     if (!batch.length) return { inserted: 0, updated: 0 };
-    const resp = await fetch(`${SERVER}/api/bookmarks`, {
+    return proxyRequest("/api/bookmarks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(batch),
     });
-    if (!resp.ok) {
-      const errText = await resp.text();
-      throw new Error(`Server ${resp.status}: ${errText}`);
-    }
-    return resp.json();
   }
 
   try {
@@ -202,13 +228,11 @@
     if (cfg.mode === "incremental") {
       notify("progress", "查詢資料庫已知書籤 ID...");
       try {
-        const res = await fetch(`${SERVER}/api/bookmarks/known-ids?complete_only=1`);
-        if (res.ok) {
-          const data = await res.json();
-          knownIds = new Set(data.ids || []);
-        }
+        const data = await proxyRequest("/api/bookmarks/known-ids?complete_only=1");
+        knownIds = new Set((data && data.ids) || []);
       } catch (e) {
-        throw new Error(`無法連線到本機 Server (${SERVER})，請確認已執行 python server.py`);
+        if (String(e.message || "").includes("401")) throw e;
+        throw new Error(`無法連線到 Server (${SERVER})，請確認服務已啟動且已授權存取（${e.message}）`);
       }
     }
 

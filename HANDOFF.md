@@ -63,26 +63,21 @@
 
 ---
 
-## 4. 下一階段實作藍圖（Phase 3 + Phase 4）
+## 4. 階段實作狀態（Phase 3 + Phase 4 已完成）
 
-> 請維持乾淨的 Commit 拆分：**Phase 3 一個 Commit、Phase 4 一個 Commit**。
+> **Phase 3 與 Phase 4 皆已依藍圖完成並分開 Commit**：
 
-### Phase 3：雙向同步取消收藏（Web 勾選 → Extension 安全執行）
+### Phase 3：雙向同步取消收藏（已完成）
 1. **後端補齊（`server.py` + `xbh/db.py`）**：
-   - 新增 `POST /api/unbookmark-ack`：接收 `{ "succeeded": [...], "failed": [...] }`，將成功的 `tweet_id` 從 `pending_unbookmark` 更新為 `unbookmarked`（並記錄 `updated_at`）。
-   - 支援批次更新 `POST /api/bookmarks/batch-status` 供 Web UI 多選操作。
+   - 新增 `POST /api/unbookmark-ack`、`POST /api/bookmarks/batch-status` 與 `GET /api/unbookmark-queue?limit=...`。
 2. **Web UI 強化（`web/index.html`）**：
-   - 新增卡片多選勾選框與浮動批次工具列（「全選本頁」、「批次標記取消收藏」、「批次還原」）。
-   - 新增「待取消收藏佇列」專屬檢視，讓使用者執行同步前可以最後覆核或一鍵反悔還原。
+   - 新增卡片多選勾選框、浮動批次工具列（「全選本頁」、「批次標記取消收藏」、「批次還原保留」）與「待取消佇列」專屬檢視。
 3. **Chrome Extension 取消收藏執行器（`extension/`）**：
-   - `popup.html` / `popup.js` 新增「執行取消收藏（顯示目前佇列數量）」按鈕與單批上限設定（預設 30 筆）。
-   - Extension 透過 `chrome.tabs` 開啟單一背景分頁依序訪問 `https://x.com/i/status/<tweet_id>`（或先在 `/i/history` 畫面比對），定位已收藏狀態的 `[data-testid="removeBookmark"]`（或對應 aria-label 按鈕）點擊取消並確認狀態切換。
-   - **必要風控保護**：每筆之間隨機延遲 **2.5～5 秒**、單批上限保護、偵測到 429／錯誤／未登入立即中斷並僅回報已確認成功的 ID 給 `POST /api/unbookmark-ack`。
+   - `popup.html` / `popup.js` 支援單背景分頁造訪 `https://x.com/i/status/<tweet_id>` 並精準定位主貼文 `<article>` 執行取消收藏，具備 2.5–5 秒隨機延遲、增量即時 ack 與 429／未登入立即中止保護。
 
-### Phase 4：VM / Docker 部署與遠端跨機同步
+### Phase 4：VM / Docker 部署與遠端跨機同步（已完成）
 1. **MV3 Service Worker 代理（解決 Mixed Content）**：
-   - 新增 `extension/background.js` 並在 `manifest.json` 註冊 `"background": { "service_worker": "background.js" }`，於 `host_permissions` 開放使用者設定的遠端 HTTP/HTTPS VM 位址（或透過 `optional_host_permissions` 動態授權）。
-   - `content.js` 改以 `chrome.runtime.sendMessage` 委託 `background.js` 呼叫伺服器 API，避免在 `https://x.com` 頁面直接 `fetch("http://<VM-IP>:7799/...")` 被瀏覽器阻擋 Mixed Content。
+   - 新增 `extension/background.js` 並在 `manifest.json` 註冊 `service_worker` 與 `optional_host_permissions`，`content.js` 與 `popup.js` 改以 `chrome.runtime.sendMessage` 委託背景代理呼叫伺服器 API。
 2. **安全性與遠端啟動**：
-   - 強化 `server.py` 的 `XBH_API_KEY` 驗證（涵蓋讀取與寫入端點，Web UI 若啟用 Key 則提示輸入一次存於 `localStorage`）。
-   - 提供 `Dockerfile`、`docker-compose.yml`（掛載 `/app/data` 與 `/app/exports`）與 VM / Tailscale 部署說明文件。
+   - `server.py` 強化 `XBH_API_KEY` 驗證（涵蓋讀取與寫入端點及 `/media/*`、`/exports/*`，保留 `/` 與 `/api/health` 公開），Web UI 新增 API Key 輸入視窗存於 `localStorage`。
+   - 提供 `Dockerfile`、`docker-compose.yml`、`.dockerignore`、`.env.example` 與 [`docs/DEPLOY.md`](docs/DEPLOY.md)。

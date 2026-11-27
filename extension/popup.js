@@ -1,4 +1,6 @@
 const serverInput = document.getElementById("serverUrl");
+const testConnBtn = document.getElementById("testConnBtn");
+const apiKeyInput = document.getElementById("apiKeyInput");
 const modeSelect = document.getElementById("modeSelect");
 const thresholdInput = document.getElementById("thresholdInput");
 const startBtn = document.getElementById("startBtn");
@@ -23,27 +25,77 @@ function normalizedServer() {
   return (serverInput.value || "http://127.0.0.1:7799").trim().replace(/\/+$/, "");
 }
 
+function currentApiKey() {
+  return (apiKeyInput.value || "").trim();
+}
+
+async function ensureOriginPermission(serverUrl) {
+  let u;
+  try {
+    u = new URL(serverUrl);
+  } catch {
+    throw new Error(`無效的 Server 位址：${serverUrl}`);
+  }
+  if (u.hostname === "localhost" || u.hostname === "127.0.0.1") {
+    return true;
+  }
+  const originPattern = `${u.protocol}//${u.hostname}/*`;
+  const has = await chrome.permissions.contains({ origins: [originPattern] });
+  if (has) return true;
+  const granted = await chrome.permissions.request({ origins: [originPattern] });
+  if (!granted) {
+    throw new Error(`未授權擴充功能存取 ${originPattern}`);
+  }
+  return true;
+}
+
+async function proxyRequest(serverUrl, path, { method = "GET", headers = {}, body = undefined } = {}) {
+  const res = await new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      {
+        source: "xbh-proxy",
+        action: "fetch",
+        url: `${serverUrl}${path}`,
+        method,
+        headers,
+        body,
+        apiKey: currentApiKey(),
+      },
+      (resp) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        resolve(resp);
+      }
+    );
+  });
+  if (!res) throw new Error("背景代理無回應");
+  if (res.status === 401) throw new Error("API Key 錯誤或未填入 (HTTP 401)");
+  if (!res.ok) throw new Error(res.error || `HTTP ${res.status}`);
+  return res.data;
+}
+
 async function refreshQueueCount() {
   const serverUrl = normalizedServer();
   try {
-    const resp = await fetch(`${serverUrl}/api/unbookmark-queue?limit=1`);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
+    const data = await proxyRequest(serverUrl, "/api/unbookmark-queue?limit=1");
     const total = Number(data.total_pending ?? data.count ?? 0);
     queueCountEl.textContent = String(total);
     if (!isUnbookmarking) {
       unbookmarkBtn.disabled = total <= 0;
     }
     return total;
-  } catch (_) {
-    queueCountEl.textContent = "離線";
+  } catch (err) {
+    queueCountEl.textContent = String(err.message || "").includes("401") ? "需驗證" : "離線";
     if (!isUnbookmarking) unbookmarkBtn.disabled = true;
     return -1;
   }
 }
 
-chrome.storage.local.get(["serverUrl", "mode", "threshold", "unbookmarkLimit"], (saved) => {
+chrome.storage.local.get(["serverUrl", "apiKey", "mode", "threshold", "unbookmarkLimit"], (saved) => {
   if (saved.serverUrl) serverInput.value = saved.serverUrl;
+  if (saved.apiKey) apiKeyInput.value = saved.apiKey;
   if (saved.mode) modeSelect.value = saved.mode;
   if (saved.threshold) thresholdInput.value = saved.threshold;
   if (saved.unbookmarkLimit) unbookmarkLimitInput.value = saved.unbookmarkLimit;
@@ -57,6 +109,10 @@ serverInput.addEventListener("change", () => {
   chrome.storage.local.set({ serverUrl: s });
   refreshQueueCount();
 });
+apiKeyInput.addEventListener("change", () => {
+  chrome.storage.local.set({ apiKey: currentApiKey() });
+  refreshQueueCount();
+});
 modeSelect.addEventListener("change", () => chrome.storage.local.set({ mode: modeSelect.value }));
 thresholdInput.addEventListener("change", () => chrome.storage.local.set({ threshold: Number(thresholdInput.value) || 15 }));
 unbookmarkLimitInput.addEventListener("change", () => {
@@ -64,7 +120,28 @@ unbookmarkLimitInput.addEventListener("change", () => {
   unbookmarkLimitInput.value = String(val);
   chrome.storage.local.set({ unbookmarkLimit: val });
 });
-refreshQueueBtn.addEventListener("click", () => refreshQueueCount());
+refreshQueueBtn.addEventListener("click", async () => {
+  try {
+    await ensureOriginPermission(normalizedServer());
+    await refreshQueueCount();
+  } catch (e) {
+    setStatus(`連線權限失敗：${e.message}`, "err");
+  }
+});
+testConnBtn.addEventListener("click", async () => {
+  const serverUrl = normalizedServer();
+  const apiKey = currentApiKey();
+  chrome.storage.local.set({ serverUrl, apiKey });
+  try {
+    await ensureOriginPermission(serverUrl);
+    const health = await proxyRequest(serverUrl, "/api/health");
+    const stats = await proxyRequest(serverUrl, "/api/stats");
+    setStatus(`連線成功！（驗證：${health.auth_required ? "已啟用" : "未啟用"}）\n資料庫共 ${stats.total} 則書籤`, "ok");
+    await refreshQueueCount();
+  } catch (e) {
+    setStatus(`連線失敗：${e.message}`, "err");
+  }
+});
 
 chrome.runtime.onMessage.addListener((msg) => {
   if (!msg || msg.source !== "xbh") return;
@@ -83,9 +160,17 @@ chrome.runtime.onMessage.addListener((msg) => {
 
 startBtn.addEventListener("click", async () => {
   const serverUrl = normalizedServer();
+  const apiKey = currentApiKey();
   const mode = modeSelect.value;
   const threshold = Math.max(3, Number(thresholdInput.value) || 15);
-  chrome.storage.local.set({ serverUrl, mode, threshold });
+  chrome.storage.local.set({ serverUrl, apiKey, mode, threshold });
+
+  try {
+    await ensureOriginPermission(serverUrl);
+  } catch (e) {
+    setStatus(`授權失敗：${e.message}`, "err");
+    return;
+  }
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || !tab.url || !tab.url.includes("x.com")) {
@@ -104,7 +189,7 @@ startBtn.addEventListener("click", async () => {
         window.__xbhConfig = cfg;
         window.__xbhStop = false;
       },
-      args: [{ serverUrl, mode, threshold }],
+      args: [{ serverUrl, apiKey, mode, threshold }],
     });
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
@@ -254,8 +339,16 @@ stopUnbookmarkBtn.addEventListener("click", () => {
 
 unbookmarkBtn.addEventListener("click", async () => {
   const serverUrl = normalizedServer();
+  const apiKey = currentApiKey();
   const batchLimit = Math.min(100, Math.max(1, Number(unbookmarkLimitInput.value) || 30));
-  chrome.storage.local.set({ serverUrl, unbookmarkLimit: batchLimit });
+  chrome.storage.local.set({ serverUrl, apiKey, unbookmarkLimit: batchLimit });
+
+  try {
+    await ensureOriginPermission(serverUrl);
+  } catch (e) {
+    setStatus(`授權失敗：${e.message}`, "err");
+    return;
+  }
 
   isUnbookmarking = true;
   unbookmarkStopRequested = false;
@@ -270,9 +363,7 @@ unbookmarkBtn.addEventListener("click", async () => {
   let abortReason = "";
 
   try {
-    const qResp = await fetch(`${serverUrl}/api/unbookmark-queue?limit=${batchLimit}`);
-    if (!qResp.ok) throw new Error(`讀取佇列失敗 (HTTP ${qResp.status})`);
-    const qData = await qResp.json();
+    const qData = await proxyRequest(serverUrl, `/api/unbookmark-queue?limit=${batchLimit}`);
     const items = qData.items || [];
     if (!items.length) {
       setStatus("待取消收藏佇列為空", "ok");
@@ -304,7 +395,7 @@ unbookmarkBtn.addEventListener("click", async () => {
 
       if (stepRes.status === "succeeded") {
         succeededCount++;
-        await fetch(`${serverUrl}/api/unbookmark-ack`, {
+        await proxyRequest(serverUrl, "/api/unbookmark-ack", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ succeeded: [item.tweet_id], failed: [] }),
@@ -327,7 +418,7 @@ unbookmarkBtn.addEventListener("click", async () => {
     }
 
     if (failedList.length > 0) {
-      await fetch(`${serverUrl}/api/unbookmark-ack`, {
+      await proxyRequest(serverUrl, "/api/unbookmark-ack", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ succeeded: [], failed: failedList }),

@@ -3,6 +3,7 @@
 
 import argparse
 from datetime import datetime
+import hmac
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -36,10 +37,17 @@ class BookmarkHubServer(ThreadingHTTPServer):
 
     allow_reuse_address = True
 
-    def __init__(self, server_address, RequestHandlerClass, db_path: Path, api_key: str = ""):
+    def __init__(
+        self,
+        server_address,
+        RequestHandlerClass,
+        db_path: Path,
+        api_key: str = "",
+        exports_dir: Path | str | None = None,
+    ):
         self.db_path = Path(db_path)
         self.media_dir = self.db_path.parent / "media"
-        self.exports_dir = EXPORTS_DIR
+        self.exports_dir = Path(exports_dir) if exports_dir else EXPORTS_DIR
         self.media_dir.mkdir(parents=True, exist_ok=True)
         self.exports_dir.mkdir(parents=True, exist_ok=True)
         self.conn = init_db(self.db_path)
@@ -68,7 +76,7 @@ class BookmarkHubHandler(BaseHTTPRequestHandler):
     def _send_cors(self) -> None:
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-API-Key")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
 
     def _send_json(self, payload: dict | list, status: int = HTTPStatus.OK) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -94,13 +102,20 @@ class BookmarkHubHandler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length) if length > 0 else b"{}"
         return json.loads(raw.decode("utf-8"))
 
-    def _check_auth(self) -> bool:
+    def _check_auth(self, allow_query: bool = False) -> bool:
         expected = self.server.api_key
         if not expected:
             return True
-        provided = self.headers.get("X-API-Key") or ""
-        if provided != expected:
-            self._send_json({"error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
+        provided = (self.headers.get("X-API-Key") or "").strip()
+        if not provided:
+            auth_hdr = (self.headers.get("Authorization") or "").strip()
+            if auth_hdr.lower().startswith("bearer "):
+                provided = auth_hdr[7:].strip()
+        if not provided and allow_query:
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            provided = (qs.get("api_key", [""])[0] or "").strip()
+        if not provided or not hmac.compare_digest(provided, expected):
+            self._send_json({"error": "Unauthorized", "auth_required": True}, HTTPStatus.UNAUTHORIZED)
             return False
         return True
 
@@ -134,7 +149,13 @@ class BookmarkHubHandler(BaseHTTPRequestHandler):
             self._send_file(WEB_INDEX, "text/html; charset=utf-8")
             return
 
+        if path == "/api/health":
+            self._send_json({"status": "ok", "auth_required": bool(self.server.api_key)})
+            return
+
         if path.startswith("/media/"):
+            if not self._check_auth(allow_query=True):
+                return
             f = self._safe_child(self.server.media_dir, path[len("/media/"):])
             if not f:
                 self._send_json({"error": "Media not found"}, HTTPStatus.NOT_FOUND)
@@ -143,6 +164,8 @@ class BookmarkHubHandler(BaseHTTPRequestHandler):
             return
 
         if path.startswith("/exports/"):
+            if not self._check_auth(allow_query=True):
+                return
             rel = urllib.parse.unquote(path[len("/exports/"):]).lstrip("/")
             if not rel or ".." in rel:
                 self._send_json({"error": "Invalid export path"}, HTTPStatus.BAD_REQUEST)
@@ -152,6 +175,9 @@ class BookmarkHubHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "Export not found"}, HTTPStatus.NOT_FOUND)
                 return
             self._send_file(candidate)
+            return
+
+        if not self._check_auth(allow_query=True):
             return
 
         if path == "/api/stats":
@@ -369,20 +395,25 @@ def create_server(
     port: int = 7799,
     db_path: Path | str = DEFAULT_DB_PATH,
     api_key: str = "",
+    exports_dir: Path | str | None = None,
 ) -> BookmarkHubServer:
     """Factory used by CLI startup and tests."""
-    return BookmarkHubServer((host, port), BookmarkHubHandler, Path(db_path), api_key=api_key)
+    return BookmarkHubServer((host, port), BookmarkHubHandler, Path(db_path), api_key=api_key, exports_dir=exports_dir)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="X Bookmark Hub HTTP server")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=7799)
-    parser.add_argument("--db", default=str(DEFAULT_DB_PATH))
+    parser.add_argument("--host", default=os.getenv("XBH_HOST", "127.0.0.1"))
+    parser.add_argument("--port", type=int, default=int(os.getenv("XBH_PORT", "7799")))
+    parser.add_argument("--db", default=os.getenv("XBH_DB_PATH", str(DEFAULT_DB_PATH)))
+    parser.add_argument("--exports-dir", default=os.getenv("XBH_EXPORTS_DIR", str(EXPORTS_DIR)))
     parser.add_argument("--api-key", default=os.getenv("XBH_API_KEY", ""))
     args = parser.parse_args()
 
-    srv = create_server(args.host, args.port, Path(args.db), api_key=args.api_key)
+    if args.host == "0.0.0.0" and not args.api_key:
+        print("WARNING: Binding to 0.0.0.0 without XBH_API_KEY! Set --api-key or XBH_API_KEY for remote deployments.")
+
+    srv = create_server(args.host, args.port, Path(args.db), api_key=args.api_key, exports_dir=Path(args.exports_dir))
     print(f"X Bookmark Hub listening on http://{args.host}:{args.port} (DB: {args.db})")
     try:
         srv.serve_forever()

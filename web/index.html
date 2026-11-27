@@ -83,6 +83,12 @@
     .lb { position: fixed; inset: 0; background: rgba(0, 0, 0, .88); display: none; align-items: center; justify-content: center; z-index: 100; padding: 24px; }
     .lb.open { display: flex; }
     .lb img { max-width: 94vw; max-height: 90vh; border-radius: 8px; }
+    .modal-bg { position: fixed; inset: 0; background: rgba(0, 0, 0, .68); display: none; align-items: center; justify-content: center; z-index: 110; padding: 20px; }
+    .modal-bg.open { display: flex; }
+    .modal-box { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; width: min(400px, 94vw); display: flex; flex-direction: column; gap: 10px; }
+    .modal-box h2 { margin: 0; font-size: 1.05rem; }
+    .modal-box input[type="password"] { background: var(--elev); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 0.9rem; width: 100%; }
+    .modal-err { color: var(--danger); font-size: 0.8rem; min-height: 1em; }
   </style>
 </head>
 <body>
@@ -115,6 +121,7 @@
         </select>
         <button class="btn" id="layoutBtn" type="button">切換瀑布流</button>
         <button class="btn" id="themeBtn" type="button">深淺色</button>
+        <button class="btn" id="keyBtn" type="button">🔑 Key</button>
       </div>
     </div>
     <div class="row-chips" id="catChips"></div>
@@ -158,6 +165,19 @@
 
 <div class="toast" id="toast"></div>
 <div class="lb" id="lb"><img id="lbImg" src="" alt="預覽大圖" /></div>
+<div class="modal-bg" id="authModal">
+  <div class="modal-box">
+    <h2>輸入伺服器 API Key</h2>
+    <div class="stats">此伺服器已啟用 `XBH_API_KEY` 驗證，請輸入金鑰（將儲存在本機瀏覽器 localStorage）。</div>
+    <input type="password" id="apiKeyInput" placeholder="輸入 XBH_API_KEY..." autocomplete="current-password" />
+    <div class="modal-err" id="authErr"></div>
+    <div class="controls" style="justify-content: flex-end;">
+      <button class="btn" id="clearKeyBtn" type="button">清除</button>
+      <button class="btn" id="cancelKeyBtn" type="button">關閉</button>
+      <button class="btn primary" id="saveKeyBtn" type="button">儲存並重試</button>
+    </div>
+  </div>
+</div>
 
 <script>
 const KIND_LABELS = { tutorial: "教學／工作流", showcase: "作品／展示", review: "評測／對比", news: "發布／新聞", question: "提問" };
@@ -166,6 +186,37 @@ const selectedIds = new Set();
 let currentPageIds = [];
 
 const esc = s => String(s || "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" })[c]);
+const KEY_STORAGE = "xbh_api_key";
+
+function getApiKey() {
+  return localStorage.getItem(KEY_STORAGE) || "";
+}
+
+function withMediaKey(url) {
+  const key = getApiKey();
+  if (!key || !url || !url.startsWith("/")) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}api_key=${encodeURIComponent(key)}`;
+}
+
+function openAuthModal(errMsg = "") {
+  document.getElementById("apiKeyInput").value = getApiKey();
+  document.getElementById("authErr").textContent = errMsg;
+  document.getElementById("authModal").classList.add("open");
+  setTimeout(() => document.getElementById("apiKeyInput").focus(), 30);
+}
+
+async function apiFetch(url, opts = {}) {
+  const key = getApiKey();
+  const headers = new Headers(opts.headers || {});
+  if (key) headers.set("X-API-Key", key);
+  const res = await fetch(url, { ...opts, headers });
+  if (res.status === 401) {
+    openAuthModal("驗證失敗或尚未設定正確的 API Key (HTTP 401)");
+    throw new Error("Unauthorized");
+  }
+  return res;
+}
 
 function updateSelectionUi() {
   const bar = document.getElementById("batchBar");
@@ -206,11 +257,15 @@ function computeSince(preset) {
 }
 
 async function fetchStats() {
-  const res = await fetch("/api/stats");
-  const s = await res.json();
-  document.getElementById("statsLine").textContent =
-    `總書籤 ${s.total} 則｜有內文 ${s.with_text} 則｜本機有圖 ${s.with_local_media} 則｜待取消 ${s.pending_unbookmark} 則｜時間 ${s.earliest ? s.earliest.slice(0,10) : "-"} ～ ${s.latest ? s.latest.slice(0,10) : "-"}`;
-  updateQueueControls(s.pending_unbookmark || 0);
+  try {
+    const res = await apiFetch("/api/stats");
+    const s = await res.json();
+    document.getElementById("statsLine").textContent =
+      `總書籤 ${s.total} 則｜有內文 ${s.with_text} 則｜本機有圖 ${s.with_local_media} 則｜待取消 ${s.pending_unbookmark} 則｜時間 ${s.earliest ? s.earliest.slice(0,10) : "-"} ～ ${s.latest ? s.latest.slice(0,10) : "-"}`;
+    updateQueueControls(s.pending_unbookmark || 0);
+  } catch (e) {
+    if (e.message !== "Unauthorized") throw e;
+  }
 }
 
 function renderFacets(facets) {
@@ -254,8 +309,14 @@ async function loadBookmarks() {
     limit: String(state.limit),
     offset: String(state.offset),
   });
-  const res = await fetch(`/api/bookmarks?${params.toString()}`);
-  const data = await res.json();
+  let data;
+  try {
+    const res = await apiFetch(`/api/bookmarks?${params.toString()}`);
+    data = await res.json();
+  } catch (e) {
+    if (e.message === "Unauthorized") return;
+    throw e;
+  }
   state.total = data.total || 0;
   renderFacets(data.facets || {});
 
@@ -269,7 +330,9 @@ async function loadBookmarks() {
   document.getElementById("nextBtn").disabled = state.offset + state.limit >= state.total;
 
   grid.innerHTML = (data.items || []).map(x => {
-    const mediaList = (x.local_media && x.local_media.length) ? x.local_media.map(m => m.startsWith("http") ? m : `/${m}`) : (x.media_urls || []);
+    const mediaList = (x.local_media && x.local_media.length)
+      ? x.local_media.map(m => m.startsWith("http") ? m : withMediaKey(`/${m}`))
+      : (x.media_urls || []);
     const isPending = x.sync_status === "pending_unbookmark";
     const isUnbookmarked = x.sync_status === "unbookmarked";
     const isSelected = selectedIds.has(x.tweet_id);
@@ -328,7 +391,7 @@ async function loadBookmarks() {
     btn.onclick = async () => {
       const tid = btn.dataset.statusId;
       const next = btn.dataset.next;
-      await fetch(`/api/bookmarks/${encodeURIComponent(tid)}/status`, {
+      await apiFetch(`/api/bookmarks/${encodeURIComponent(tid)}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sync_status: next }),
@@ -360,11 +423,11 @@ document.getElementById("queueBackBtn").onclick = () => {
 };
 document.getElementById("queueRestoreAllBtn").onclick = async () => {
   if (!confirm("確定要將所有待取消收藏的書籤還原為有效保留嗎？")) return;
-  const qRes = await fetch("/api/unbookmark-queue");
+  const qRes = await apiFetch("/api/unbookmark-queue");
   const qData = await qRes.json();
   const ids = (qData.items || []).map(x => x.tweet_id);
   if (!ids.length) { toast("目前沒有待取消收藏的項目"); return; }
-  const res = await fetch("/api/bookmarks/batch-status", {
+  const res = await apiFetch("/api/bookmarks/batch-status", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ tweet_ids: ids, sync_status: "active" }),
@@ -388,7 +451,7 @@ function toggleSelectPage(forceSelect) {
 async function applyBatchStatus(syncStatus, label) {
   const ids = [...selectedIds];
   if (!ids.length) return;
-  const res = await fetch("/api/bookmarks/batch-status", {
+  const res = await apiFetch("/api/bookmarks/batch-status", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ tweet_ids: ids, sync_status: syncStatus }),
@@ -418,7 +481,7 @@ document.getElementById("nextBtn").onclick = () => { if (state.offset + state.li
 
 document.getElementById("classifyBtn").onclick = async () => {
   toast("正在執行規則分類...");
-  const res = await fetch("/api/classify", { method: "POST" });
+  const res = await apiFetch("/api/classify", { method: "POST" });
   const r = await res.json();
   toast(`規則分類完成：更新 ${r.updated || 0} 則`);
   await Promise.all([fetchStats(), loadBookmarks()]);
@@ -426,7 +489,7 @@ document.getElementById("classifyBtn").onclick = async () => {
 
 async function triggerExport(fmt) {
   toast(`正在匯出 ${fmt.toUpperCase()}...`);
-  const res = await fetch("/api/export", {
+  const res = await apiFetch("/api/export", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -442,11 +505,30 @@ async function triggerExport(fmt) {
   const r = await res.json();
   if (r.download_url) {
     toast(`匯出完成（${r.count} 則）：${r.path}`);
-    window.open(r.download_url, "_blank");
+    window.open(withMediaKey(r.download_url), "_blank");
   } else {
     toast(`Obsidian Vault 匯出完成（${r.notes} 篇筆記）：${r.path}`);
   }
 }
+
+document.getElementById("keyBtn").onclick = () => openAuthModal();
+document.getElementById("cancelKeyBtn").onclick = () => document.getElementById("authModal").classList.remove("open");
+document.getElementById("clearKeyBtn").onclick = () => {
+  localStorage.removeItem(KEY_STORAGE);
+  document.getElementById("apiKeyInput").value = "";
+  document.getElementById("authModal").classList.remove("open");
+  toast("已清除儲存的 API Key");
+};
+document.getElementById("saveKeyBtn").onclick = async () => {
+  const val = document.getElementById("apiKeyInput").value.trim();
+  if (val) localStorage.setItem(KEY_STORAGE, val);
+  else localStorage.removeItem(KEY_STORAGE);
+  document.getElementById("authModal").classList.remove("open");
+  await Promise.all([fetchStats(), loadBookmarks()]);
+};
+document.getElementById("apiKeyInput").addEventListener("keydown", e => {
+  if (e.key === "Enter") document.getElementById("saveKeyBtn").click();
+});
 
 document.getElementById("exportHtmlBtn").onclick = () => triggerExport("html");
 document.getElementById("exportObsBtn").onclick = () => triggerExport("obsidian");
