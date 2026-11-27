@@ -1,0 +1,88 @@
+# X Bookmark Hub — 專案交接與開發指南（HANDOFF）
+
+本文件彙整本專案的建立背景、已完成項目（Phase 1 + Phase 2）、現有本機資料資產，以及下一階段（Phase 3 + Phase 4）的實作規格。當你把 Antigravity 工作區切換到 `D:\Work\x-bookmark-hub` 開啟新對話時，請先閱讀本文件即可無縫接手。
+
+---
+
+## 1. 背景與技術決策摘要
+
+1. **為何改採全新 MIT Clean-Room 重寫（而非直接 Fork / Mirror `midnitebliss/markbook`）**
+   - 原專案 `midnitebliss/markbook` 最後更新於 9 個月前，且**未附任何開源授權（無 `LICENSE`）**，依法預設為 All Rights Reserved。
+   - X 書籤頁已從 `x.com/i/bookmarks` 導向 `x.com/i/history`，`markbook` 舊版選擇器（`[data-testid="tweetText"]`、`<time>`、`[data-testid="tweetPhoto"]`）已全面失效，導致舊資料庫 `D:\Work\markbook\db\markbook.db` 中 8,180 筆資料僅存 URL／`tweet_id`，內文與圖片皆為空。
+   - 本專案以 **MIT License** 從零撰寫，保留了 `markbook` **唯一成功繞過 X Content-Security-Policy (CSP) 的核心優勢**——透過 Manifest V3 `chrome.scripting.executeScript` 在隔離環境讀取 DOM 並傳給本機 HTTP Server，同時全面重寫解析器、增量同步、SQLite FTS5、補完管線與 Web UI。
+2. **零強制第三方 Python 依賴**
+   - 考慮到工作電腦／VM 環境限制，全專案後端僅使用 Python 3.10+ 標準函式庫（`http.server.ThreadingHTTPServer`、`sqlite3` FTS5、`urllib.request`、`concurrent.futures`、`unittest`），不需額外 `pip install`。
+3. **吸收外部高效工作流經驗（對照 `D:\Work\markbook\x.json` 與 `video-gen-vault`）**
+   - **頁內 JS 高速捲動**：由 Chrome Extension 直接在瀏覽器分頁執行捲動迴圈，每 30 筆即時批次 POST，不經 AI 回合往返、不耗 AI Token。
+   - **兩段式資料補完（`xbh/enricher.py`）**：透過公開端點 `https://api.fxtwitter.com/i/status/<id>` 補齊被 `Show more` 截斷的全文、引用貼文、讚數與高畫質媒體網址。
+   - **雙維度檢視與月度 Vault**：結合「模型 × 內容型態（教學/作品/評測/新聞/提問）」雙維度篩選、繁中標題/摘要、瀑布流/卡片切換，以及按 `YYYY-MM/` 歸檔的 Obsidian Vault。
+
+---
+
+## 2. 已完成項目（Phase 1 + Phase 2）
+
+### 檔案清冊
+- `server.py`：零依賴 `ThreadingHTTPServer`（預設 `127.0.0.1:7799`，可透過 `--host` / `--port` / `--db` / `XBH_API_KEY` 設定）。
+- `web/index.html`：內建單頁 Web UI（FTS5 搜尋、分類／模型／內容類型三層篩選、時間篩選、排序、瀑布流/網格切換、深淺色切換、Lightbox 大圖、標記待取消收藏、一鍵匯出離線 HTML / Obsidian Vault）。
+- `extension/`（MV3 Chrome 擴充功能，於 `chrome://extensions/` 以「載入未封裝項目」載入）：
+  - `manifest.json`、`popup.html`、`popup.js`、`content.js`
+  - 相容 `x.com/i/history`（`article` 與 `li[data-index]`、`whitespace-pre`、`font-bold`）與傳統 DOM，並由 Tweet Snowflake ID 反算正確 `created_at`。
+  - 支援 **增量同步（Incremental Sync）**：啟動先查 `GET /api/bookmarks/known-ids?complete_only=1`（刻意排除無內文的舊殼資料），連續遇到門檻筆數（預設 15 筆）皆已在庫且有完整內容時自動停止。
+- `xbh/db.py`：SQLite WAL + FTS5（ASCII 走 FTS5 `MATCH`，含 CJK 字元自動切換精準子字串 `LIKE`）＋不覆寫既有人工/AI 整理欄位的智慧 `UPSERT`。
+- `xbh/importers.py`：支援匯入舊版 `markbook.db` 與 `bookmarks_raw.json` / `bookmarks_filtered.json`（含 `assets/` 搬移）。
+- `xbh/enricher.py`：`FxTwitter` 補完器 + 多執行緒本機圖片快取（存入 `data/media/`）。
+- `xbh/classifier.py`：第一層零成本規則分類（模型標籤 + 領域分類 + 內容類型）＋ 第二層選配 OpenAI 相容介面 LLM 增量繁中標題摘要。
+- `xbh/exporter.py`：單檔帶圖離線 HTML 匯出器 + 按月歸檔 Obsidian Vault 匯出器。
+- `cli.py`：統一命令列工具（`stats` / `import-markbook` / `import-json` / `enrich` / `cache-media` / `classify` / `summarize` / `export-html` / `export-obsidian`）。
+- `tests/test_core.py`：`unittest` 單元與即時 HTTP API 整合測試。
+
+### 目前已提供的 API 端點
+- `GET /`：Web UI
+- `GET /media/<filename>`、`GET /exports/<filename>`：本機圖片與匯出檔案服務（含路徑穿越防護）
+- `GET /api/stats`：資料庫統計
+- `GET /api/bookmarks/known-ids?complete_only=1`：供 Extension 增量比對
+- `GET /api/bookmarks`：多維度篩選、搜尋與分頁
+- `POST /api/bookmarks`：批次寫入並自動執行輕量規則分類
+- `PATCH /api/bookmarks/<tweet_id>/status`：更新 `sync_status`（`active` / `pending_unbookmark` / `unbookmarked`）
+- `GET /api/unbookmark-queue`：查詢待取消收藏清單（供 Phase 3 擴充使用）
+- `POST /api/classify`：重跑規則分類
+- `POST /api/export`：匯出目前篩選結果為離線 HTML 或 Obsidian Vault
+
+---
+
+## 3. 本機既有資料資產位置（未納入 Git 版控）
+
+1. **已遷移至本專案 `data/` 的資料（詳見 `python cli.py stats`）**：
+   - `D:\Work\x-bookmark-hub\data\bookmarks.db`（由以下來源匯入整合）：
+     - `D:\Work\markbook\db\markbook.db`（8,180 筆舊 `tweet_id`，已自動反算 Snowflake 日期與 `@handle`）
+     - `C:\Users\admin\.gemini\antigravity\scratch\x-bookmarks\bookmarks_raw.json`（602 則 `2026-11-03 ~ 2026-11-26` 貼文）
+     - `C:\Users\admin\.gemini\antigravity\scratch\x-bookmarks\bookmarks_filtered.json` + `assets/`（125 篇 AI 摘要與分類 + 181 張本機圖片）
+2. **另一對話產出（僅供對照參考，尚未強制匯入）**：
+   - `C:\Users\admin\Documents\x-bookmarks\video-gen-vault\`（721 則近半年影片生成討論整理）
+   - 若之後要全量補齊這 8,180 筆舊書籤的內文，建議直接用新版 Extension 在 Chrome 執行一次**全量掃描**，或針對近半年貼文執行 `python cli.py enrich --since 2026-05-26 --limit 500`。
+
+---
+
+## 4. 下一階段實作藍圖（Phase 3 + Phase 4）
+
+> 請維持乾淨的 Commit 拆分：**Phase 3 一個 Commit、Phase 4 一個 Commit**。
+
+### Phase 3：雙向同步取消收藏（Web 勾選 → Extension 安全執行）
+1. **後端補齊（`server.py` + `xbh/db.py`）**：
+   - 新增 `POST /api/unbookmark-ack`：接收 `{ "succeeded": [...], "failed": [...] }`，將成功的 `tweet_id` 從 `pending_unbookmark` 更新為 `unbookmarked`（並記錄 `updated_at`）。
+   - 支援批次更新 `POST /api/bookmarks/batch-status` 供 Web UI 多選操作。
+2. **Web UI 強化（`web/index.html`）**：
+   - 新增卡片多選勾選框與浮動批次工具列（「全選本頁」、「批次標記取消收藏」、「批次還原」）。
+   - 新增「待取消收藏佇列」專屬檢視，讓使用者執行同步前可以最後覆核或一鍵反悔還原。
+3. **Chrome Extension 取消收藏執行器（`extension/`）**：
+   - `popup.html` / `popup.js` 新增「執行取消收藏（顯示目前佇列數量）」按鈕與單批上限設定（預設 30 筆）。
+   - Extension 透過 `chrome.tabs` 開啟單一背景分頁依序訪問 `https://x.com/i/status/<tweet_id>`（或先在 `/i/history` 畫面比對），定位已收藏狀態的 `[data-testid="removeBookmark"]`（或對應 aria-label 按鈕）點擊取消並確認狀態切換。
+   - **必要風控保護**：每筆之間隨機延遲 **2.5～5 秒**、單批上限保護、偵測到 429／錯誤／未登入立即中斷並僅回報已確認成功的 ID 給 `POST /api/unbookmark-ack`。
+
+### Phase 4：VM / Docker 部署與遠端跨機同步
+1. **MV3 Service Worker 代理（解決 Mixed Content）**：
+   - 新增 `extension/background.js` 並在 `manifest.json` 註冊 `"background": { "service_worker": "background.js" }`，於 `host_permissions` 開放使用者設定的遠端 HTTP/HTTPS VM 位址（或透過 `optional_host_permissions` 動態授權）。
+   - `content.js` 改以 `chrome.runtime.sendMessage` 委託 `background.js` 呼叫伺服器 API，避免在 `https://x.com` 頁面直接 `fetch("http://<VM-IP>:7799/...")` 被瀏覽器阻擋 Mixed Content。
+2. **安全性與遠端啟動**：
+   - 強化 `server.py` 的 `XBH_API_KEY` 驗證（涵蓋讀取與寫入端點，Web UI 若啟用 Key 則提示輸入一次存於 `localStorage`）。
+   - 提供 `Dockerfile`、`docker-compose.yml`（掛載 `/app/data` 與 `/app/exports`）與 VM / Tailscale 部署說明文件。
