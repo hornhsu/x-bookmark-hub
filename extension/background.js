@@ -1,5 +1,10 @@
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (!msg || msg.source !== "xbh-proxy" || msg.action !== "fetch") return;
+  if (!msg || msg.source !== "xbh-proxy") return;
+  if (msg.action === "ping") {
+    sendResponse({ ok: true });
+    return;
+  }
+  if (msg.action !== "fetch") return;
   (async () => {
     try {
       let apiKey = msg.apiKey || "";

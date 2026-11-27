@@ -184,26 +184,46 @@
   }
 
   async function proxyRequest(path, { method = "GET", headers = {}, body = undefined } = {}) {
-    const res = await new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage(
-        {
-          source: "xbh-proxy",
-          action: "fetch",
-          url: `${SERVER}${path}`,
-          method,
-          headers,
-          body,
-          apiKey: cfg.apiKey || "",
-        },
-        (resp) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-            return;
+    const sendOnce = () =>
+      new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+          {
+            source: "xbh-proxy",
+            action: "fetch",
+            url: `${SERVER}${path}`,
+            method,
+            headers,
+            body,
+            apiKey: cfg.apiKey || "",
+          },
+          (resp) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+              return;
+            }
+            resolve(resp);
           }
-          resolve(resp);
+        );
+      });
+
+    let res;
+    try {
+      res = await sendOnce();
+    } catch (err) {
+      if (String(err.message || "").includes("Receiving end does not exist")) {
+        await sleep(200);
+        try {
+          res = await sendOnce();
+        } catch (retryErr) {
+          if (String(retryErr.message || "").includes("Receiving end does not exist")) {
+            throw new Error("背景代理未啟動，請先到 chrome://extensions/ 點擊 X Bookmark Hub 的「重新載入 (↻)」按鈕後再試");
+          }
+          throw retryErr;
         }
-      );
-    });
+      } else {
+        throw err;
+      }
+    }
     if (!res) throw new Error(`無法透過背景代理連線到 Server (${SERVER})`);
     if (res.status === 401) {
       throw new Error("Server 回傳 401 Unauthorized，請在擴充功能填入正確的 API Key");

@@ -50,30 +50,43 @@ async function ensureOriginPermission(serverUrl) {
 }
 
 async function proxyRequest(serverUrl, path, { method = "GET", headers = {}, body = undefined } = {}) {
-  const res = await new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(
-      {
-        source: "xbh-proxy",
-        action: "fetch",
-        url: `${serverUrl}${path}`,
-        method,
-        headers,
-        body,
-        apiKey: currentApiKey(),
-      },
-      (resp) => {
+  const apiKey = currentApiKey();
+  const reqHeaders = Object.assign({}, headers);
+  if (apiKey && !reqHeaders["X-API-Key"]) {
+    reqHeaders["X-API-Key"] = apiKey;
+  }
+  const resp = await fetch(`${serverUrl}${path}`, {
+    method,
+    headers: reqHeaders,
+    body,
+  });
+  if (resp.status === 401) throw new Error("API Key 錯誤或未填入 (HTTP 401)");
+  const text = await resp.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch (_) {}
+  if (!resp.ok) throw new Error((data && data.error) || text || `HTTP ${resp.status}`);
+  return data;
+}
+
+async function pingBackgroundWorker() {
+  const attempt = () =>
+    new Promise((resolve) => {
+      chrome.runtime.sendMessage({ source: "xbh-proxy", action: "ping" }, (resp) => {
         if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
+          resolve({ ok: false, error: chrome.runtime.lastError.message });
           return;
         }
-        resolve(resp);
-      }
-    );
-  });
-  if (!res) throw new Error("背景代理無回應");
-  if (res.status === 401) throw new Error("API Key 錯誤或未填入 (HTTP 401)");
-  if (!res.ok) throw new Error(res.error || `HTTP ${res.status}`);
-  return res.data;
+        resolve({ ok: Boolean(resp && resp.ok), error: "" });
+      });
+    });
+  let res = await attempt();
+  if (!res.ok && String(res.error || "").includes("Receiving end does not exist")) {
+    await new Promise((r) => setTimeout(r, 200));
+    res = await attempt();
+  }
+  return res;
 }
 
 async function refreshQueueCount() {
@@ -136,7 +149,16 @@ testConnBtn.addEventListener("click", async () => {
     await ensureOriginPermission(serverUrl);
     const health = await proxyRequest(serverUrl, "/api/health");
     const stats = await proxyRequest(serverUrl, "/api/stats");
-    setStatus(`連線成功！（驗證：${health.auth_required ? "已啟用" : "未啟用"}）\n資料庫共 ${stats.total} 則書籤`, "ok");
+    const sw = await pingBackgroundWorker();
+    if (!sw.ok) {
+      setStatus(
+        `伺服器連線正常（驗證：${health.auth_required ? "已啟用" : "未啟用"}｜共 ${stats.total} 則書籤）\n` +
+          "⚠️ 背景代理尚未註冊：請到 chrome://extensions/ 點擊「重新載入 (↻)」以啟用 v1.2.0 背景代理。",
+        "err"
+      );
+    } else {
+      setStatus(`連線成功！（驗證：${health.auth_required ? "已啟用" : "未啟用"}）\n資料庫共 ${stats.total} 則書籤`, "ok");
+    }
     await refreshQueueCount();
   } catch (e) {
     setStatus(`連線失敗：${e.message}`, "err");
