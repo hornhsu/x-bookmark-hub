@@ -609,6 +609,65 @@ def ack_unbookmark_results(
     }
 
 
+def purge_unbookmarked(
+    conn: sqlite3.Connection,
+    tweet_ids: list[str] | None = None,
+    media_dir: Path | None = None,
+) -> dict[str, int]:
+    """Permanently delete unbookmarked rows and optionally clean up unreferenced local media."""
+    if tweet_ids is not None:
+        clean_ids = list(dict.fromkeys(str(tid).strip() for tid in tweet_ids if str(tid).strip()))
+        if not clean_ids:
+            return {"deleted": 0, "media_deleted": 0}
+        placeholders = ",".join("?" for _ in clean_ids)
+        target_rows = conn.execute(
+            f"SELECT tweet_id, local_media FROM bookmarks WHERE sync_status = 'unbookmarked' AND tweet_id IN ({placeholders})",
+            clean_ids,
+        ).fetchall()
+        cur = conn.execute(
+            f"DELETE FROM bookmarks WHERE sync_status = 'unbookmarked' AND tweet_id IN ({placeholders})",
+            clean_ids,
+        )
+    else:
+        target_rows = conn.execute(
+            "SELECT tweet_id, local_media FROM bookmarks WHERE sync_status = 'unbookmarked'"
+        ).fetchall()
+        cur = conn.execute("DELETE FROM bookmarks WHERE sync_status = 'unbookmarked'")
+
+    conn.commit()
+    deleted_count = cur.rowcount
+
+    media_deleted = 0
+    if media_dir and deleted_count > 0:
+        base_media = Path(media_dir).resolve()
+        candidates: set[str] = set()
+        for row in target_rows:
+            for item in _json_list(row["local_media"]):
+                s = str(item).strip()
+                if s and not s.startswith("http"):
+                    candidates.add(Path(s).name)
+        if candidates:
+            referenced: set[str] = set()
+            ref_rows = conn.execute(
+                "SELECT local_media FROM bookmarks WHERE local_media != '[]'"
+            ).fetchall()
+            for r in ref_rows:
+                for item in _json_list(r["local_media"]):
+                    s = str(item).strip()
+                    if s and not s.startswith("http"):
+                        referenced.add(Path(s).name)
+            for fname in candidates - referenced:
+                try:
+                    cand = (base_media / fname).resolve()
+                    if cand.is_relative_to(base_media) and cand.is_file():
+                        cand.unlink()
+                        media_deleted += 1
+                except OSError:
+                    pass
+
+    return {"deleted": deleted_count, "media_deleted": media_deleted}
+
+
 def get_stats(conn: sqlite3.Connection) -> dict[str, Any]:
     """Return overall database statistics."""
     row = conn.execute(

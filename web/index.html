@@ -51,6 +51,9 @@
       background: color-mix(in srgb, var(--danger) 12%, var(--card)); border: 1px solid var(--danger);
       border-radius: 10px; padding: 11px 14px; margin-bottom: 14px; font-size: 0.85rem;
     }
+    .queue-banner.ok {
+      background: color-mix(in srgb, var(--ok) 10%, var(--card)); border-color: var(--ok);
+    }
     .queue-banner.open { display: flex; }
     .batch-bar {
       position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 45;
@@ -78,7 +81,15 @@
     .mini-btn.restore { border-color: var(--ok); color: var(--ok); }
     a { color: var(--acc); text-decoration: none; }
     a:hover { text-decoration: underline; }
-    .pager { display: flex; justify-content: center; gap: 10px; margin-top: 24px; align-items: center; }
+    .pager { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; margin-top: 24px; align-items: center; }
+    .page-nums { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+    .page-nums .btn { min-width: 34px; padding: 6px 9px; text-align: center; }
+    .page-ellipsis { color: var(--dim); padding: 0 4px; font-size: 0.85rem; }
+    .page-jump { display: inline-flex; align-items: center; gap: 6px; font-size: 0.84rem; color: var(--dim); margin-left: 6px; }
+    #jumpPageInput {
+      width: 64px; background: var(--elev); color: var(--fg); border: 1px solid var(--line);
+      border-radius: 8px; padding: 6px 8px; font-size: 0.85rem; text-align: center;
+    }
     .toast { position: fixed; bottom: 20px; right: 20px; background: var(--elev); border: 1px solid var(--acc); color: var(--fg); padding: 10px 14px; border-radius: 10px; font-size: 0.85rem; display: none; z-index: 50; max-width: 420px; }
     .lb { position: fixed; inset: 0; background: rgba(0, 0, 0, .88); display: none; align-items: center; justify-content: center; z-index: 100; padding: 24px; }
     .lb.open { display: flex; }
@@ -138,6 +149,13 @@
       <button class="btn restore" id="queueRestoreAllBtn" type="button">全部還原保留</button>
     </div>
   </div>
+  <div class="queue-banner ok" id="unbookmarkedBanner">
+    <div id="unbookmarkedBannerText">已取消收藏紀錄檢視：這些貼文已從 X 取消收藏並留存在本機歷史紀錄中。</div>
+    <div class="controls">
+      <button class="btn" id="unbookmarkedBackBtn" type="button">← 返回有效書籤</button>
+      <button class="btn danger" id="purgeAllUnbookmarkedBtn" type="button">清除全部已取消紀錄</button>
+    </div>
+  </div>
   <div class="toolbar">
     <span id="resultInfo">查詢中...</span>
     <div class="controls">
@@ -149,9 +167,15 @@
   </div>
   <div class="grid" id="grid"></div>
   <div class="pager">
-    <button class="btn" id="prevBtn" type="button">上一頁</button>
-    <span id="pageInfo"></span>
-    <button class="btn" id="nextBtn" type="button">下一頁</button>
+    <button class="btn" id="firstBtn" type="button">« 首頁</button>
+    <button class="btn" id="prevBtn" type="button">‹ 上一頁</button>
+    <span class="page-nums" id="pageNums"></span>
+    <button class="btn" id="nextBtn" type="button">下一頁 ›</button>
+    <button class="btn" id="lastBtn" type="button">末頁 »</button>
+    <span class="page-jump">
+      跳至 <input type="number" id="jumpPageInput" min="1" value="1" /> / <span id="totalPagesSpan">1</span> 頁
+      <button class="btn" id="jumpPageBtn" type="button">前往</button>
+    </span>
   </div>
 </main>
 
@@ -161,6 +185,7 @@
   <button class="btn" id="batchClearBtn" type="button">取消全選</button>
   <button class="btn danger" id="batchMarkBtn" type="button">批次標記取消收藏</button>
   <button class="btn restore" id="batchRestoreBtn" type="button">批次還原保留</button>
+  <button class="btn danger" id="batchPurgeBtn" type="button" style="display:none">永久刪除已取消</button>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -224,12 +249,14 @@ function updateSelectionUi() {
   bar.classList.toggle("open", selectedIds.size > 0);
   const allSelected = currentPageIds.length > 0 && currentPageIds.every(id => selectedIds.has(id));
   document.getElementById("selectPageBtn").textContent = allSelected ? "取消全選本頁" : "全選本頁";
+  document.getElementById("batchPurgeBtn").style.display = state.status === "unbookmarked" ? "inline-block" : "none";
 }
 
-function updateQueueControls(pendingCount) {
+function updateQueueControls(pendingCount, unbookmarkedCount) {
   document.getElementById("queueCountBadge").textContent = String(pendingCount || 0);
   const qBtn = document.getElementById("queueViewBtn");
   const isQueue = state.status === "pending_unbookmark";
+  const isUnbookmarked = state.status === "unbookmarked";
   qBtn.classList.toggle("queue-active", isQueue);
   qBtn.classList.toggle("queue-has", !isQueue && (pendingCount || 0) > 0);
   const banner = document.getElementById("queueBanner");
@@ -238,6 +265,13 @@ function updateQueueControls(pendingCount) {
     document.getElementById("queueBannerText").textContent =
       `待取消收藏佇列（共 ${pendingCount || 0} 則）：可勾選或單筆「還原保留」，確認後再於 Chrome 擴充功能執行低風險限速取消收藏。`;
   }
+  const uBanner = document.getElementById("unbookmarkedBanner");
+  uBanner.classList.toggle("open", isUnbookmarked);
+  if (isUnbookmarked && unbookmarkedCount !== undefined) {
+    document.getElementById("unbookmarkedBannerText").textContent =
+      `已取消收藏紀錄（共 ${unbookmarkedCount} 則）：這些貼文已從 X 取消收藏，可於此還原或永久清除紀錄與未共用圖片。`;
+  }
+  updateSelectionUi();
 }
 
 function toast(msg) {
@@ -261,8 +295,8 @@ async function fetchStats() {
     const res = await apiFetch("/api/stats");
     const s = await res.json();
     document.getElementById("statsLine").textContent =
-      `總書籤 ${s.total} 則｜有內文 ${s.with_text} 則｜本機有圖 ${s.with_local_media} 則｜待取消 ${s.pending_unbookmark} 則｜時間 ${s.earliest ? s.earliest.slice(0,10) : "-"} ～ ${s.latest ? s.latest.slice(0,10) : "-"}`;
-    updateQueueControls(s.pending_unbookmark || 0);
+      `總書籤 ${s.total} 則｜有內文 ${s.with_text} 則｜本機有圖 ${s.with_local_media} 則｜待取消 ${s.pending_unbookmark} 則｜已取消 ${s.unbookmarked || 0} 則｜時間 ${s.earliest ? s.earliest.slice(0,10) : "-"} ～ ${s.latest ? s.latest.slice(0,10) : "-"}`;
+    updateQueueControls(s.pending_unbookmark || 0, s.unbookmarked || 0);
   } catch (e) {
     if (e.message !== "Unauthorized") throw e;
   }
@@ -325,9 +359,7 @@ async function loadBookmarks() {
   const start = state.total ? state.offset + 1 : 0;
   const end = Math.min(state.offset + state.limit, state.total);
   document.getElementById("resultInfo").textContent = `顯示第 ${start}–${end} 則，共符合 ${state.total} 則`;
-  document.getElementById("pageInfo").textContent = `第 ${Math.floor(state.offset / state.limit) + 1} / ${Math.max(1, Math.ceil(state.total / state.limit))} 頁`;
-  document.getElementById("prevBtn").disabled = state.offset <= 0;
-  document.getElementById("nextBtn").disabled = state.offset + state.limit >= state.total;
+  renderPagination();
 
   grid.innerHTML = (data.items || []).map(x => {
     const mediaList = (x.local_media && x.local_media.length)
@@ -336,9 +368,11 @@ async function loadBookmarks() {
     const isPending = x.sync_status === "pending_unbookmark";
     const isUnbookmarked = x.sync_status === "unbookmarked";
     const isSelected = selectedIds.has(x.tweet_id);
-    const statusBtn = (isPending || isUnbookmarked)
-      ? `<button class="mini-btn restore" data-status-id="${esc(x.tweet_id)}" data-next="active">還原保留</button>`
-      : `<button class="mini-btn danger" data-status-id="${esc(x.tweet_id)}" data-next="pending_unbookmark">標記取消收藏</button>`;
+    const statusBtn = isUnbookmarked
+      ? `<span style="display:inline-flex;gap:6px;"><button class="mini-btn restore" data-status-id="${esc(x.tweet_id)}" data-next="active">還原保留</button><button class="mini-btn danger" data-purge-id="${esc(x.tweet_id)}">永久刪除</button></span>`
+      : isPending
+        ? `<button class="mini-btn restore" data-status-id="${esc(x.tweet_id)}" data-next="active">還原保留</button>`
+        : `<button class="mini-btn danger" data-status-id="${esc(x.tweet_id)}" data-next="pending_unbookmark">標記取消收藏</button>`;
     return `
       <article class="card ${isPending ? "pending" : ""} ${isSelected ? "selected" : ""}">
         ${mediaList.length ? `<div class="media">${mediaList.slice(0, 4).map(src => `<img loading="lazy" src="${esc(src)}" alt="" onerror="this.style.display='none'">`).join("")}</div>` : ""}
@@ -400,6 +434,67 @@ async function loadBookmarks() {
       await Promise.all([fetchStats(), loadBookmarks()]);
     };
   });
+
+  grid.querySelectorAll("[data-purge-id]").forEach(btn => {
+    btn.onclick = async () => {
+      const tid = btn.dataset.purgeId;
+      if (!confirm("確定要從伺服器永久刪除此筆已取消收藏紀錄（含未共用的本機圖片）嗎？")) return;
+      const res = await apiFetch("/api/bookmarks/purge-unbookmarked", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tweet_ids: [tid], delete_media: true }),
+      });
+      const r = await res.json();
+      selectedIds.delete(tid);
+      toast(`已永久清除 ${r.deleted || 0} 則紀錄與 ${r.media_deleted || 0} 個圖片檔`);
+      await Promise.all([fetchStats(), loadBookmarks()]);
+    };
+  });
+}
+
+function getTotalPages() {
+  return Math.max(1, Math.ceil(state.total / state.limit));
+}
+
+function goToPage(pageNum) {
+  const totalPages = getTotalPages();
+  const p = Math.min(totalPages, Math.max(1, Number(pageNum) || 1));
+  state.offset = (p - 1) * state.limit;
+  loadBookmarks();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function renderPagination() {
+  const totalPages = getTotalPages();
+  const curPage = Math.min(totalPages, Math.floor(state.offset / state.limit) + 1);
+  document.getElementById("firstBtn").disabled = curPage <= 1;
+  document.getElementById("prevBtn").disabled = curPage <= 1;
+  document.getElementById("nextBtn").disabled = curPage >= totalPages;
+  document.getElementById("lastBtn").disabled = curPage >= totalPages;
+  document.getElementById("totalPagesSpan").textContent = String(totalPages);
+  const jumpInput = document.getElementById("jumpPageInput");
+  jumpInput.max = String(totalPages);
+  jumpInput.value = String(curPage);
+
+  const pages = [];
+  const addPage = p => { if (!pages.includes(p)) pages.push(p); };
+  addPage(1);
+  for (let p = Math.max(1, curPage - 2); p <= Math.min(totalPages, curPage + 2); p++) addPage(p);
+  addPage(totalPages);
+  pages.sort((a, b) => a - b);
+
+  const parts = [];
+  let prev = 0;
+  for (const p of pages) {
+    if (prev && p - prev > 1) parts.push(`<span class="page-ellipsis">…</span>`);
+    parts.push(`<button class="btn ${p === curPage ? "primary" : ""}" data-page="${p}" type="button">${p}</button>`);
+    prev = p;
+  }
+  const container = document.getElementById("pageNums");
+  container.innerHTML = parts.join("");
+  container.querySelectorAll("[data-page]").forEach(btn => {
+    btn.onclick = () => goToPage(Number(btn.dataset.page));
+  });
 }
 
 let searchTimer = null;
@@ -420,6 +515,25 @@ document.getElementById("queueBackBtn").onclick = () => {
   document.getElementById("statusSelect").value = "active";
   state.offset = 0;
   Promise.all([fetchStats(), loadBookmarks()]);
+};
+document.getElementById("unbookmarkedBackBtn").onclick = () => {
+  state.status = "active";
+  document.getElementById("statusSelect").value = "active";
+  state.offset = 0;
+  Promise.all([fetchStats(), loadBookmarks()]);
+};
+document.getElementById("purgeAllUnbookmarkedBtn").onclick = async () => {
+  if (!confirm("確定要永久清除所有「已取消收藏」的伺服器紀錄及未共用的本機圖片嗎？此操作無法復原。")) return;
+  const res = await apiFetch("/api/bookmarks/purge-unbookmarked", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ delete_media: true }),
+  });
+  const r = await res.json();
+  selectedIds.clear();
+  state.offset = 0;
+  toast(`已永久清除 ${r.deleted || 0} 則紀錄與 ${r.media_deleted || 0} 個圖片檔`);
+  await Promise.all([fetchStats(), loadBookmarks()]);
 };
 document.getElementById("queueRestoreAllBtn").onclick = async () => {
   if (!confirm("確定要將所有待取消收藏的書籤還原為有效保留嗎？")) return;
@@ -473,11 +587,31 @@ document.getElementById("batchClearBtn").onclick = () => {
 };
 document.getElementById("batchMarkBtn").onclick = () => applyBatchStatus("pending_unbookmark", "批次標記取消收藏");
 document.getElementById("batchRestoreBtn").onclick = () => applyBatchStatus("active", "批次還原保留");
+document.getElementById("batchPurgeBtn").onclick = async () => {
+  const ids = [...selectedIds];
+  if (!ids.length) return;
+  if (!confirm(`確定要從伺服器永久刪除這 ${ids.length} 則已取消收藏紀錄（含未共用圖片）嗎？`)) return;
+  const res = await apiFetch("/api/bookmarks/purge-unbookmarked", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tweet_ids: ids, delete_media: true }),
+  });
+  const r = await res.json();
+  selectedIds.clear();
+  toast(`已永久清除 ${r.deleted || 0} 則紀錄與 ${r.media_deleted || 0} 個圖片檔`);
+  await Promise.all([fetchStats(), loadBookmarks()]);
+};
 document.getElementById("sortSelect").onchange = e => { state.sort = e.target.value; state.offset = 0; loadBookmarks(); };
 document.getElementById("layoutBtn").onclick = () => { state.masonry = !state.masonry; loadBookmarks(); };
 document.getElementById("themeBtn").onclick = () => { const r = document.documentElement; r.dataset.theme = r.dataset.theme === "dark" ? "light" : "dark"; };
-document.getElementById("prevBtn").onclick = () => { state.offset = Math.max(0, state.offset - state.limit); loadBookmarks(); };
-document.getElementById("nextBtn").onclick = () => { if (state.offset + state.limit < state.total) { state.offset += state.limit; loadBookmarks(); } };
+document.getElementById("firstBtn").onclick = () => goToPage(1);
+document.getElementById("prevBtn").onclick = () => goToPage(Math.floor(state.offset / state.limit));
+document.getElementById("nextBtn").onclick = () => goToPage(Math.floor(state.offset / state.limit) + 2);
+document.getElementById("lastBtn").onclick = () => goToPage(getTotalPages());
+document.getElementById("jumpPageBtn").onclick = () => goToPage(document.getElementById("jumpPageInput").value);
+document.getElementById("jumpPageInput").addEventListener("keydown", e => {
+  if (e.key === "Enter") goToPage(e.target.value);
+});
 
 document.getElementById("classifyBtn").onclick = async () => {
   toast("正在執行規則分類...");

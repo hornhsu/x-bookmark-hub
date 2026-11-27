@@ -481,6 +481,96 @@ class CoreTests(unittest.TestCase):
             srv.shutdown()
             srv.server_close()
 
+    def test_purge_unbookmarked_and_media_cleanup(self) -> None:
+        srv_db = self.root / "srv_purge" / "hub.db"
+        srv = create_server("127.0.0.1", 0, srv_db)
+        (srv.media_dir / "shared.jpg").write_bytes(b"shared")
+        (srv.media_dir / "unique_un.jpg").write_bytes(b"unique")
+
+        port = srv.server_address[1]
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        try:
+            base = f"http://127.0.0.1:{port}"
+            seed = [
+                {
+                    "tweet_id": "2125546356609790433",
+                    "text": "KeepActive shared media",
+                    "sync_status": "active",
+                    "local_media": ["media/shared.jpg"],
+                },
+                {
+                    "tweet_id": "2125519521427681660",
+                    "text": "PendingKeep",
+                    "sync_status": "pending_unbookmark",
+                },
+                {
+                    "tweet_id": "2125842510585192551",
+                    "text": "PurgeUniqueToken",
+                    "sync_status": "unbookmarked",
+                    "local_media": ["media/unique_un.jpg"],
+                },
+                {
+                    "tweet_id": "2125865347584860623",
+                    "text": "PurgeSharedMedia",
+                    "sync_status": "unbookmarked",
+                    "local_media": ["media/shared.jpg"],
+                },
+            ]
+            req = urllib.request.Request(
+                f"{base}/api/bookmarks",
+                data=json.dumps(seed).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req) as resp:
+                self.assertEqual(json.loads(resp.read().decode("utf-8"))["inserted"], 4)
+
+            # Purge specific tweet_ids including an active ID -> only unbookmarked one deleted
+            purge_one = urllib.request.Request(
+                f"{base}/api/bookmarks/purge-unbookmarked",
+                data=json.dumps(
+                    {
+                        "tweet_ids": ["2125842510585192551", "2125546356609790433"],
+                        "delete_media": True,
+                    }
+                ).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(purge_one) as resp:
+                r1 = json.loads(resp.read().decode("utf-8"))
+            self.assertEqual(r1["deleted"], 1)
+            self.assertEqual(r1["media_deleted"], 1)
+            self.assertFalse((srv.media_dir / "unique_un.jpg").exists())
+            self.assertTrue((srv.media_dir / "shared.jpg").exists())
+
+            # FTS5 trigger should also have removed purged row
+            with urllib.request.urlopen(f"{base}/api/bookmarks?status=all&q=PurgeUniqueToken") as resp:
+                self.assertEqual(json.loads(resp.read().decode("utf-8"))["total"], 0)
+
+            # Purge all remaining unbookmarked -> deletes 2125865347584860623, keeps shared.jpg because active uses it
+            purge_all = urllib.request.Request(
+                f"{base}/api/bookmarks/purge-unbookmarked",
+                data=json.dumps({}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(purge_all) as resp:
+                r2 = json.loads(resp.read().decode("utf-8"))
+            self.assertEqual(r2["deleted"], 1)
+            self.assertEqual(r2["media_deleted"], 0)
+            self.assertTrue((srv.media_dir / "shared.jpg").exists())
+
+            with urllib.request.urlopen(f"{base}/api/stats") as resp:
+                st = json.loads(resp.read().decode("utf-8"))
+            self.assertEqual(st["total"], 2)
+            self.assertEqual(st["unbookmarked"], 0)
+            self.assertEqual(st["pending_unbookmark"], 1)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()

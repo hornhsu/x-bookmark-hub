@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 from xbh.classifier import classify_all, summarize_with_llm
-from xbh.db import DEFAULT_DB_PATH, init_db, get_stats, query_bookmarks
+from xbh.db import DEFAULT_DB_PATH, init_db, get_stats, purge_unbookmarked, query_bookmarks
 from xbh.enricher import cache_media, enrich_bookmarks
 from xbh.exporter import export_obsidian_vault, export_offline_html
 from xbh.importers import import_json_bookmarks, import_markbook_db
@@ -61,6 +61,9 @@ def main() -> None:
     p_eo.add_argument("--search", default="", help="FTS5 search query")
     p_eo.add_argument("--out", default="exports/obsidian-vault", help="Output Obsidian folder path")
 
+    p_pu = sub.add_parser("purge-unbookmarked", help="Permanently delete unbookmarked rows and unreferenced media")
+    p_pu.add_argument("--keep-media", action="store_true", help="Keep local media files on disk")
+
     args = parser.parse_args()
     db_path = Path(args.db)
     media_dir = db_path.parent / "media"
@@ -104,6 +107,9 @@ def main() -> None:
         elif args.cmd == "export-obsidian":
             data = query_bookmarks(conn, search=args.search, category=args.category, model=args.model, since=args.since, limit=0, include_facets=False)
             res = export_obsidian_vault(data["items"], Path(args.out), media_dir=media_dir)
+            print(json.dumps(res, ensure_ascii=False, indent=2))
+        elif args.cmd == "purge-unbookmarked":
+            res = purge_unbookmarked(conn, media_dir=None if args.keep_media else media_dir)
             print(json.dumps(res, ensure_ascii=False, indent=2))
     finally:
         conn.close()

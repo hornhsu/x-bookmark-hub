@@ -21,6 +21,7 @@ from xbh.db import (
     get_stats,
     get_unbookmark_queue,
     init_db,
+    purge_unbookmarked,
     query_bookmarks,
     update_sync_status,
     upsert_many,
@@ -297,6 +298,29 @@ class BookmarkHubHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(e)}, HTTPStatus.BAD_REQUEST)
                 return
             self._send_json({"sync_status": status, "requested": len(clean_ids), "updated": changed})
+            return
+
+        if path == "/api/bookmarks/purge-unbookmarked":
+            try:
+                body = self._read_json_body()
+            except json.JSONDecodeError:
+                self._send_json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            if not isinstance(body, dict):
+                self._send_json({"error": "Expected JSON object"}, HTTPStatus.BAD_REQUEST)
+                return
+            tweet_ids = body.get("tweet_ids")
+            if tweet_ids is not None and not isinstance(tweet_ids, list):
+                self._send_json({"error": "tweet_ids must be a list or null"}, HTTPStatus.BAD_REQUEST)
+                return
+            delete_media = bool(body.get("delete_media", True))
+            with self.server.db_lock:
+                res = purge_unbookmarked(
+                    self.server.conn,
+                    tweet_ids=tweet_ids,
+                    media_dir=self.server.media_dir if delete_media else None,
+                )
+            self._send_json(res)
             return
 
         if path == "/api/unbookmark-ack":
