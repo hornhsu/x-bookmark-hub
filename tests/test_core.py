@@ -6,6 +6,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 import urllib.error
 import urllib.request
 
@@ -22,6 +23,7 @@ from xbh.db import (
     upsert_many,
 )
 from xbh.exporter import export_obsidian_vault, export_offline_html
+from xbh.enricher import cache_media, enrich_bookmarks
 from xbh.importers import import_json_bookmarks, import_markbook_db
 
 
@@ -570,6 +572,84 @@ class CoreTests(unittest.TestCase):
         finally:
             srv.shutdown()
             srv.server_close()
+
+    def test_enrich_priority_and_only_missing(self) -> None:
+        upsert_many(
+            self.conn,
+            [
+                {
+                    "tweet_id": "2125842510585192551",
+                    "created_at": "2026-11-26T01:00:00Z",
+                    "text": "Complete text without enriched_at",
+                },
+                {
+                    "tweet_id": "2125519521427681660",
+                    "created_at": "2026-11-25T10:00:00Z",
+                    "text": "Truncated post Show more",
+                    "is_truncated": 1,
+                },
+                {
+                    "tweet_id": "2125546356609790433",
+                    "created_at": "2026-11-24T10:00:00Z",
+                    "text": "",
+                },
+            ],
+        )
+
+        called: list[str] = []
+
+        def fake_fetch(tid: str):
+            called.append(tid)
+            return "ok", {
+                "text": f"Full text for {tid}",
+                "author": {"name": "Tester", "screen_name": "tester"},
+                "likes": 5,
+            }
+
+        with patch("xbh.enricher.fetch_fxtwitter", side_effect=fake_fetch):
+            res1 = enrich_bookmarks(self.conn, limit=0, only_missing=True, delay=0, workers=1)
+        self.assertEqual(res1["targeted"], 2)
+        self.assertEqual(res1["enriched"], 2)
+        # Empty-text shell must be prioritized before truncated, even though truncated is newer
+        self.assertEqual(called, ["2125546356609790433", "2125519521427681660"])
+
+        called.clear()
+        with patch("xbh.enricher.fetch_fxtwitter", side_effect=fake_fetch):
+            res2 = enrich_bookmarks(self.conn, limit=0, only_missing=False, delay=0, workers=1)
+        self.assertEqual(res2["targeted"], 1)
+        self.assertEqual(called, ["2125842510585192551"])
+
+    def test_cache_media_limit_zero(self) -> None:
+        upsert_many(
+            self.conn,
+            [
+                {
+                    "tweet_id": "2125546356609790433",
+                    "text": "Active 1",
+                    "media_urls": ["https://pbs.twimg.com/media/a.jpg"],
+                },
+                {
+                    "tweet_id": "2125519521427681660",
+                    "text": "Active 2",
+                    "media_urls": ["https://pbs.twimg.com/media/b.jpg"],
+                },
+                {
+                    "tweet_id": "2125842510585192551",
+                    "text": "Unbookmarked",
+                    "sync_status": "unbookmarked",
+                    "media_urls": ["https://pbs.twimg.com/media/c.jpg"],
+                },
+            ],
+        )
+
+        def fake_download(_media_dir: Path, tid: str, idx: int, _url: str):
+            return tid, idx, f"media/{tid}_{idx}.jpg"
+
+        with patch("xbh.enricher._download_one", side_effect=fake_download):
+            res = cache_media(self.conn, self.media_dir, limit=0, max_workers=2)
+        self.assertEqual(res["targeted_tweets"], 2)
+        self.assertEqual(res["updated_tweets"], 2)
+        self.assertEqual(res["images_cached"], 2)
 
 
 if __name__ == "__main__":

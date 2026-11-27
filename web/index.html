@@ -1,378 +1,907 @@
 <!doctype html>
 <html lang="zh-Hant" data-theme="dark">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>X Bookmark Hub｜本機書籤知識庫</title>
   <style>
     :root {
-      --bg: #0e1117; --card: #161b24; --elev: #202634; --line: #2a3142;
-      --fg: #e9eef7; --dim: #92a0b8; --acc: #4ea1ff; --h3: #ff8f4c; --danger: #ff6b6b; --ok: #51cf66;
+      --bg: #0e1117;
+      --card: #161b24;
+      --elev: #202634;
+      --line: #2a3142;
+      --fg: #e9eef7;
+      --dim: #92a0b8;
+      --acc: #4ea1ff;
+      --h3: #ff8f4c;
+      --danger: #ff6b6b;
+      --ok: #51cf66;
     }
+
     [data-theme="light"] {
-      --bg: #f4f6fb; --card: #ffffff; --elev: #eceff7; --line: #d6deec;
-      --fg: #171b24; --dim: #5d677c; --acc: #2b5ce0; --h3: #d9480f; --danger: #e03131; --ok: #2f9e44;
+      --bg: #f4f6fb;
+      --card: #ffffff;
+      --elev: #eceff7;
+      --line: #d6deec;
+      --fg: #171b24;
+      --dim: #5d677c;
+      --acc: #2b5ce0;
+      --h3: #d9480f;
+      --danger: #e03131;
+      --ok: #2f9e44;
     }
-    * { box-sizing: border-box; }
-    body { margin: 0; background: var(--bg); color: var(--fg); font: 14.5px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", sans-serif; }
-    header { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); padding: 14px 20px; }
-    .wrap { max-width: 1420px; margin: 0 auto; }
-    .top { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-    h1 { margin: 0; font-size: 1.28rem; }
-    .stats { font-size: 0.83rem; color: var(--dim); margin-top: 2px; }
-    .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-    input[type="search"], select, button.btn {
-      background: var(--elev); color: var(--fg); border: 1px solid var(--line); border-radius: 9px; padding: 7px 11px; font-size: 0.86rem;
+
+    * {
+      box-sizing: border-box;
     }
-    input[type="search"] { width: min(330px, 85vw); }
-    button.btn { cursor: pointer; }
-    button.btn.primary { background: var(--acc); color: #051324; border-color: var(--acc); font-weight: 600; }
-    .row-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
-    .chip { background: var(--elev); color: var(--dim); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 0.78rem; cursor: pointer; }
-    .chip.on { background: var(--acc); color: #041222; border-color: var(--acc); font-weight: 600; }
-    .chip.h3.on { background: var(--h3); color: #fff; border-color: var(--h3); }
-    main { max-width: 1420px; margin: 0 auto; padding: 18px 20px 60px; }
-    .toolbar { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; margin-bottom: 14px; font-size: 0.85rem; color: var(--dim); }
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 16px; }
-    .grid.masonry { display: block; columns: 350px; column-gap: 16px; }
-    .grid.masonry .card { break-inside: avoid; margin-bottom: 16px; }
-    .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
-    .card.pending { border-color: var(--danger); opacity: 0.86; }
-    .card.selected { box-shadow: 0 0 0 2px var(--acc); border-color: var(--acc); }
-    .sel-box { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font-size: 0.76rem; color: var(--dim); margin-left: auto; user-select: none; }
-    .sel-box input { accent-color: var(--acc); cursor: pointer; }
-    .badge.done { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); }
-    button.btn.queue-has { border-color: var(--danger); color: var(--danger); }
-    button.btn.queue-active { background: var(--danger); color: #fff; border-color: var(--danger); font-weight: 600; }
-    button.btn.danger { background: var(--danger); color: #fff; border-color: var(--danger); font-weight: 600; }
-    button.btn.restore { background: var(--ok); color: #041b09; border-color: var(--ok); font-weight: 600; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 14.5px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", sans-serif;
+    }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: color-mix(in srgb, var(--bg) 92%, transparent);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--line);
+      padding: 14px 20px;
+    }
+
+    .wrap {
+      max-width: 1420px;
+      margin: 0 auto;
+    }
+
+    .top {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 1.28rem;
+    }
+
+    .stats {
+      font-size: 0.83rem;
+      color: var(--dim);
+      margin-top: 2px;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    input[type="search"],
+    select,
+    button.btn {
+      background: var(--elev);
+      color: var(--fg);
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 7px 11px;
+      font-size: 0.86rem;
+    }
+
+    input[type="search"] {
+      width: min(330px, 85vw);
+    }
+
+    button.btn {
+      cursor: pointer;
+    }
+
+    button.btn.primary {
+      background: var(--acc);
+      color: #051324;
+      border-color: var(--acc);
+      font-weight: 600;
+    }
+
+    .row-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+      align-items: center;
+    }
+
+    .chip {
+      background: var(--elev);
+      color: var(--dim);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 3px 10px;
+      font-size: 0.78rem;
+      cursor: pointer;
+    }
+
+    .chip.on {
+      background: var(--acc);
+      color: #041222;
+      border-color: var(--acc);
+      font-weight: 600;
+    }
+
+    .chip.h3.on {
+      background: var(--h3);
+      color: #fff;
+      border-color: var(--h3);
+    }
+
+    main {
+      max-width: 1420px;
+      margin: 0 auto;
+      padding: 18px 20px 60px;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+      font-size: 0.85rem;
+      color: var(--dim);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+      gap: 16px;
+    }
+
+    .grid.masonry {
+      display: block;
+      columns: 350px;
+      column-gap: 16px;
+    }
+
+    .grid.masonry .card {
+      break-inside: avoid;
+      margin-bottom: 16px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .card.pending {
+      border-color: var(--danger);
+      opacity: 0.86;
+    }
+
+    .card.selected {
+      box-shadow: 0 0 0 2px var(--acc);
+      border-color: var(--acc);
+    }
+
+    .sel-box {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      font-size: 0.76rem;
+      color: var(--dim);
+      margin-left: auto;
+      user-select: none;
+    }
+
+    .sel-box input {
+      accent-color: var(--acc);
+      cursor: pointer;
+    }
+
+    .badge.done {
+      background: color-mix(in srgb, var(--ok) 20%, transparent);
+      color: var(--ok);
+    }
+
+    button.btn.queue-has {
+      border-color: var(--danger);
+      color: var(--danger);
+    }
+
+    button.btn.queue-active {
+      background: var(--danger);
+      color: #fff;
+      border-color: var(--danger);
+      font-weight: 600;
+    }
+
+    button.btn.danger {
+      background: var(--danger);
+      color: #fff;
+      border-color: var(--danger);
+      font-weight: 600;
+    }
+
+    button.btn.restore {
+      background: var(--ok);
+      color: #041b09;
+      border-color: var(--ok);
+      font-weight: 600;
+    }
+
     .queue-banner {
-      display: none; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
-      background: color-mix(in srgb, var(--danger) 12%, var(--card)); border: 1px solid var(--danger);
-      border-radius: 10px; padding: 11px 14px; margin-bottom: 14px; font-size: 0.85rem;
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      background: color-mix(in srgb, var(--danger) 12%, var(--card));
+      border: 1px solid var(--danger);
+      border-radius: 10px;
+      padding: 11px 14px;
+      margin-bottom: 14px;
+      font-size: 0.85rem;
     }
+
     .queue-banner.ok {
-      background: color-mix(in srgb, var(--ok) 10%, var(--card)); border-color: var(--ok);
+      background: color-mix(in srgb, var(--ok) 10%, var(--card));
+      border-color: var(--ok);
     }
-    .queue-banner.open { display: flex; }
+
+    .queue-banner.open {
+      display: flex;
+    }
+
     .batch-bar {
-      position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 45;
-      display: none; align-items: center; flex-wrap: wrap; gap: 8px;
-      background: var(--elev); border: 1px solid var(--acc); border-radius: 12px;
-      padding: 9px 14px; box-shadow: 0 10px 30px rgba(0, 0, 0, .45); max-width: 95vw;
+      position: fixed;
+      bottom: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 45;
+      display: none;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      background: var(--elev);
+      border: 1px solid var(--acc);
+      border-radius: 12px;
+      padding: 9px 14px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, .45);
+      max-width: 95vw;
     }
-    .batch-bar.open { display: flex; }
-    .media { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 2px; background: #05070a; }
-    .media img { width: 100%; max-height: 250px; object-fit: cover; display: block; cursor: zoom-in; }
-    .body { padding: 13px 15px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
-    .meta { display: flex; flex-wrap: wrap; gap: 7px; font-size: 0.78rem; color: var(--dim); align-items: center; }
-    .badge { background: color-mix(in srgb, var(--acc) 18%, transparent); color: var(--acc); border-radius: 6px; padding: 1px 7px; font-size: 0.74rem; font-weight: 600; }
-    .badge.v { background: color-mix(in srgb, var(--h3) 20%, transparent); color: var(--h3); }
-    .badge.p { background: color-mix(in srgb, var(--danger) 20%, transparent); color: var(--danger); }
-    .title { margin: 0; font-size: 0.99rem; line-height: 1.4; }
-    .sum { margin: 0; font-size: 0.86rem; color: var(--dim); }
-    .txt { white-space: pre-wrap; word-break: break-word; font-size: 0.87rem; }
-    .q { border-left: 3px solid var(--acc); padding: 6px 10px; background: var(--elev); font-size: 0.81rem; color: var(--dim); white-space: pre-wrap; border-radius: 0 6px 6px 0; }
-    .tags { display: flex; flex-wrap: wrap; gap: 5px; }
-    .tag { background: var(--elev); border: 1px solid var(--line); border-radius: 6px; padding: 1px 7px; font-size: 0.74rem; color: var(--dim); }
-    .foot { margin-top: auto; padding-top: 8px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 0.8rem; }
-    .mini-btn { background: transparent; color: var(--dim); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; font-size: 0.75rem; cursor: pointer; }
-    .mini-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
-    .mini-btn.restore { border-color: var(--ok); color: var(--ok); }
-    a { color: var(--acc); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    .pager { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; margin-top: 24px; align-items: center; }
-    .page-nums { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-    .page-nums .btn { min-width: 34px; padding: 6px 9px; text-align: center; }
-    .page-ellipsis { color: var(--dim); padding: 0 4px; font-size: 0.85rem; }
-    .page-jump { display: inline-flex; align-items: center; gap: 6px; font-size: 0.84rem; color: var(--dim); margin-left: 6px; }
-    #jumpPageInput {
-      width: 64px; background: var(--elev); color: var(--fg); border: 1px solid var(--line);
-      border-radius: 8px; padding: 6px 8px; font-size: 0.85rem; text-align: center;
+
+    .batch-bar.open {
+      display: flex;
     }
-    .toast { position: fixed; bottom: 20px; right: 20px; background: var(--elev); border: 1px solid var(--acc); color: var(--fg); padding: 10px 14px; border-radius: 10px; font-size: 0.85rem; display: none; z-index: 50; max-width: 420px; }
-    .lb { position: fixed; inset: 0; background: rgba(0, 0, 0, .88); display: none; align-items: center; justify-content: center; z-index: 100; padding: 24px; }
-    .lb.open { display: flex; }
-    .lb img { max-width: 94vw; max-height: 90vh; border-radius: 8px; }
-    .modal-bg { position: fixed; inset: 0; background: rgba(0, 0, 0, .68); display: none; align-items: center; justify-content: center; z-index: 110; padding: 20px; }
-    .modal-bg.open { display: flex; }
-    .modal-box { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; width: min(400px, 94vw); display: flex; flex-direction: column; gap: 10px; }
-    .modal-box h2 { margin: 0; font-size: 1.05rem; }
-    .modal-box input[type="password"] { background: var(--elev); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 0.9rem; width: 100%; }
-    .modal-err { color: var(--danger); font-size: 0.8rem; min-height: 1em; }
+
+    .media {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 2px;
+      background: #05070a;
+      max-height: 220px;
+      overflow: hidden;
+    }
+
+    .media img {
+      width: 100%;
+      height: 210px;
+      object-fit: cover;
+      display: block;
+      cursor: zoom-in;
+    }
+
+    .body {
+      padding: 13px 15px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex: 1;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      font-size: 0.78rem;
+      color: var(--dim);
+      align-items: center;
+    }
+
+    .badge {
+      background: color-mix(in srgb, var(--acc) 18%, transparent);
+      color: var(--acc);
+      border-radius: 6px;
+      padding: 1px 7px;
+      font-size: 0.74rem;
+      font-weight: 600;
+    }
+
+    .badge.v {
+      background: color-mix(in srgb, var(--h3) 20%, transparent);
+      color: var(--h3);
+    }
+
+    .badge.p {
+      background: color-mix(in srgb, var(--danger) 20%, transparent);
+      color: var(--danger);
+    }
+
+    .title {
+      margin: 0;
+      font-size: 0.99rem;
+      line-height: 1.4;
+    }
+
+    .sum {
+      margin: 0;
+      font-size: 0.86rem;
+      color: var(--dim);
+    }
+
+    .txt {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 0.87rem;
+    }
+
+    .snippet {
+      font-size: 0.87rem;
+      color: var(--fg);
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    details.orig {
+      background: var(--elev);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 7px 10px;
+      font-size: 0.83rem;
+    }
+
+    details.orig summary {
+      cursor: pointer;
+      color: var(--acc);
+      font-weight: 500;
+      user-select: none;
+    }
+
+    .orig-text {
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin-top: 7px;
+      color: var(--fg);
+    }
+
+    .ext-links {
+      margin-top: 7px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      font-size: 0.8rem;
+    }
+
+    .q {
+      border-left: 3px solid var(--acc);
+      padding: 6px 10px;
+      background: var(--elev);
+      font-size: 0.81rem;
+      color: var(--dim);
+      white-space: pre-wrap;
+      border-radius: 0 6px 6px 0;
+      margin-top: 7px;
+    }
+
+    .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+
+    .tag {
+      background: var(--elev);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 1px 7px;
+      font-size: 0.74rem;
+      color: var(--dim);
+    }
+
+    .foot {
+      margin-top: auto;
+      padding-top: 8px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+    }
+
+    .mini-btn {
+      background: transparent;
+      color: var(--dim);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 3px 8px;
+      font-size: 0.75rem;
+      cursor: pointer;
+    }
+
+    .mini-btn.danger:hover {
+      border-color: var(--danger);
+      color: var(--danger);
+    }
+
+    .mini-btn.restore {
+      border-color: var(--ok);
+      color: var(--ok);
+    }
+
+    a {
+      color: var(--acc);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .pager {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .pager.top {
+      margin: 0 0 14px;
+    }
+
+    .pager.bottom {
+      margin-top: 24px;
+    }
+
+    .page-nums {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      align-items: center;
+    }
+
+    .page-nums .btn {
+      min-width: 34px;
+      padding: 6px 9px;
+      text-align: center;
+    }
+
+    .page-ellipsis {
+      color: var(--dim);
+      padding: 0 4px;
+      font-size: 0.85rem;
+    }
+
+    .page-jump {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.84rem;
+      color: var(--dim);
+      margin-left: 6px;
+    }
+
+    .pager input[type="number"] {
+      width: 64px;
+      background: var(--elev);
+      color: var(--fg);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 6px 8px;
+      font-size: 0.85rem;
+      text-align: center;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: var(--elev);
+      border: 1px solid var(--acc);
+      color: var(--fg);
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 0.85rem;
+      display: none;
+      z-index: 50;
+      max-width: 420px;
+    }
+
+    .lb {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, .88);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      padding: 24px;
+    }
+
+    .lb.open {
+      display: flex;
+    }
+
+    .lb img {
+      max-width: 94vw;
+      max-height: 90vh;
+      border-radius: 8px;
+    }
+
+    .modal-bg {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, .68);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 110;
+      padding: 20px;
+    }
+
+    .modal-bg.open {
+      display: flex;
+    }
+
+    .modal-box {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 18px 20px;
+      width: min(400px, 94vw);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .modal-box h2 {
+      margin: 0;
+      font-size: 1.05rem;
+    }
+
+    .modal-box input[type="password"] {
+      background: var(--elev);
+      color: var(--fg);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 0.9rem;
+      width: 100%;
+    }
+
+    .modal-err {
+      color: var(--danger);
+      font-size: 0.8rem;
+      min-height: 1em;
+    }
   </style>
 </head>
+
 <body>
-<header>
-  <div class="wrap">
-    <div class="top">
-      <div>
-        <h1>X Bookmark Hub</h1>
-        <div class="stats" id="statsLine">載入統計中...</div>
+  <header>
+    <div class="wrap">
+      <div class="top">
+        <div>
+          <h1>X Bookmark Hub</h1>
+          <div class="stats" id="statsLine">載入統計中...</div>
+        </div>
+        <div class="controls">
+          <input type="search" id="searchInput" placeholder="FTS5 全文搜尋（關鍵字、模型、作者）..." />
+          <select id="sinceSelect">
+            <option value="">全部時間</option>
+            <option value="6m">近半年</option>
+            <option value="30d">近 30 天</option>
+          </select>
+          <select id="statusSelect">
+            <option value="active">有效書籤</option>
+            <option value="pending_unbookmark">待取消收藏</option>
+            <option value="unbookmarked">已取消收藏</option>
+            <option value="all">全部狀態</option>
+          </select>
+          <button class="btn" id="queueViewBtn" type="button">待取消佇列 (<span id="queueCountBadge">0</span>)</button>
+          <select id="sortSelect">
+            <option value="newest">最新貼文</option>
+            <option value="likes">最多讚</option>
+            <option value="bookmark">收藏順序</option>
+            <option value="oldest">最舊貼文</option>
+          </select>
+          <button class="btn" id="layoutBtn" type="button">切換瀑布流</button>
+          <button class="btn" id="themeBtn" type="button">深淺色</button>
+          <button class="btn" id="keyBtn" type="button">🔑 Key</button>
+        </div>
       </div>
+      <div class="row-chips" id="catChips"></div>
+      <div class="row-chips" id="kindChips"></div>
+      <div class="row-chips" id="modelChips"></div>
+    </div>
+  </header>
+
+  <main>
+    <div class="queue-banner" id="queueBanner">
+      <div id="queueBannerText">待取消收藏佇列檢視：請覆核下列貼文，確認無誤後開啟 Chrome 擴充功能執行低風險限速取消收藏。</div>
       <div class="controls">
-        <input type="search" id="searchInput" placeholder="FTS5 全文搜尋（關鍵字、模型、作者）..." />
-        <select id="sinceSelect">
-          <option value="">全部時間</option>
-          <option value="6m">近半年</option>
-          <option value="30d">近 30 天</option>
-        </select>
-        <select id="statusSelect">
-          <option value="active">有效書籤</option>
-          <option value="pending_unbookmark">待取消收藏</option>
-          <option value="unbookmarked">已取消收藏</option>
-          <option value="all">全部狀態</option>
-        </select>
-        <button class="btn" id="queueViewBtn" type="button">待取消佇列 (<span id="queueCountBadge">0</span>)</button>
-        <select id="sortSelect">
-          <option value="newest">最新貼文</option>
-          <option value="likes">最多讚</option>
-          <option value="bookmark">收藏順序</option>
-          <option value="oldest">最舊貼文</option>
-        </select>
-        <button class="btn" id="layoutBtn" type="button">切換瀑布流</button>
-        <button class="btn" id="themeBtn" type="button">深淺色</button>
-        <button class="btn" id="keyBtn" type="button">🔑 Key</button>
+        <button class="btn" id="queueBackBtn" type="button">← 返回有效書籤</button>
+        <button class="btn restore" id="queueRestoreAllBtn" type="button">全部還原保留</button>
       </div>
     </div>
-    <div class="row-chips" id="catChips"></div>
-    <div class="row-chips" id="kindChips"></div>
-    <div class="row-chips" id="modelChips"></div>
-  </div>
-</header>
+    <div class="queue-banner ok" id="unbookmarkedBanner">
+      <div id="unbookmarkedBannerText">已取消收藏紀錄檢視：這些貼文已從 X 取消收藏並留存在本機歷史紀錄中。</div>
+      <div class="controls">
+        <button class="btn" id="unbookmarkedBackBtn" type="button">← 返回有效書籤</button>
+        <button class="btn danger" id="purgeAllUnbookmarkedBtn" type="button">清除全部已取消紀錄</button>
+      </div>
+    </div>
+    <div class="toolbar">
+      <span id="resultInfo">查詢中...</span>
+      <div class="controls">
+        <button class="btn" id="selectPageBtn" type="button">全選本頁</button>
+        <button class="btn" id="classifyBtn" type="button">執行規則分類</button>
+        <button class="btn primary" id="exportHtmlBtn" type="button">一鍵匯出離線 HTML</button>
+        <button class="btn" id="exportObsBtn" type="button">一鍵匯出 Obsidian Vault</button>
+      </div>
+    </div>
+    <div class="pager top"></div>
+    <div class="grid" id="grid"></div>
+    <div class="pager bottom"></div>
+  </main>
 
-<main>
-  <div class="queue-banner" id="queueBanner">
-    <div id="queueBannerText">待取消收藏佇列檢視：請覆核下列貼文，確認無誤後開啟 Chrome 擴充功能執行低風險限速取消收藏。</div>
-    <div class="controls">
-      <button class="btn" id="queueBackBtn" type="button">← 返回有效書籤</button>
-      <button class="btn restore" id="queueRestoreAllBtn" type="button">全部還原保留</button>
+  <div class="batch-bar" id="batchBar">
+    <strong id="batchCount">已選取 0 則</strong>
+    <button class="btn" id="batchSelectPageBtn" type="button">全選本頁</button>
+    <button class="btn" id="batchClearBtn" type="button">取消全選</button>
+    <button class="btn danger" id="batchMarkBtn" type="button">批次標記取消收藏</button>
+    <button class="btn restore" id="batchRestoreBtn" type="button">批次還原保留</button>
+    <button class="btn danger" id="batchPurgeBtn" type="button" style="display:none">永久刪除已取消</button>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <div class="lb" id="lb"><img id="lbImg" src="" alt="預覽大圖" /></div>
+  <div class="modal-bg" id="authModal">
+    <div class="modal-box">
+      <h2>輸入伺服器 API Key</h2>
+      <div class="stats">此伺服器已啟用 `XBH_API_KEY` 驗證，請輸入金鑰（將儲存在本機瀏覽器 localStorage）。</div>
+      <input type="password" id="apiKeyInput" placeholder="輸入 XBH_API_KEY..." autocomplete="current-password" />
+      <div class="modal-err" id="authErr"></div>
+      <div class="controls" style="justify-content: flex-end;">
+        <button class="btn" id="clearKeyBtn" type="button">清除</button>
+        <button class="btn" id="cancelKeyBtn" type="button">關閉</button>
+        <button class="btn primary" id="saveKeyBtn" type="button">儲存並重試</button>
+      </div>
     </div>
   </div>
-  <div class="queue-banner ok" id="unbookmarkedBanner">
-    <div id="unbookmarkedBannerText">已取消收藏紀錄檢視：這些貼文已從 X 取消收藏並留存在本機歷史紀錄中。</div>
-    <div class="controls">
-      <button class="btn" id="unbookmarkedBackBtn" type="button">← 返回有效書籤</button>
-      <button class="btn danger" id="purgeAllUnbookmarkedBtn" type="button">清除全部已取消紀錄</button>
-    </div>
-  </div>
-  <div class="toolbar">
-    <span id="resultInfo">查詢中...</span>
-    <div class="controls">
-      <button class="btn" id="selectPageBtn" type="button">全選本頁</button>
-      <button class="btn" id="classifyBtn" type="button">執行規則分類</button>
-      <button class="btn primary" id="exportHtmlBtn" type="button">一鍵匯出離線 HTML</button>
-      <button class="btn" id="exportObsBtn" type="button">一鍵匯出 Obsidian Vault</button>
-    </div>
-  </div>
-  <div class="grid" id="grid"></div>
-  <div class="pager">
-    <button class="btn" id="firstBtn" type="button">« 首頁</button>
-    <button class="btn" id="prevBtn" type="button">‹ 上一頁</button>
-    <span class="page-nums" id="pageNums"></span>
-    <button class="btn" id="nextBtn" type="button">下一頁 ›</button>
-    <button class="btn" id="lastBtn" type="button">末頁 »</button>
-    <span class="page-jump">
-      跳至 <input type="number" id="jumpPageInput" min="1" value="1" /> / <span id="totalPagesSpan">1</span> 頁
-      <button class="btn" id="jumpPageBtn" type="button">前往</button>
-    </span>
-  </div>
-</main>
 
-<div class="batch-bar" id="batchBar">
-  <strong id="batchCount">已選取 0 則</strong>
-  <button class="btn" id="batchSelectPageBtn" type="button">全選本頁</button>
-  <button class="btn" id="batchClearBtn" type="button">取消全選</button>
-  <button class="btn danger" id="batchMarkBtn" type="button">批次標記取消收藏</button>
-  <button class="btn restore" id="batchRestoreBtn" type="button">批次還原保留</button>
-  <button class="btn danger" id="batchPurgeBtn" type="button" style="display:none">永久刪除已取消</button>
-</div>
+  <script>
+    const KIND_LABELS = { tutorial: "教學／工作流", showcase: "作品／展示", review: "評測／對比", news: "發布／新聞", question: "提問" };
+    const state = { q: "", category: "", kind: "", model: "", sincePreset: "", status: "active", sort: "newest", masonry: false, limit: 60, offset: 0, total: 0 };
+    const selectedIds = new Set();
+    let currentPageIds = [];
 
-<div class="toast" id="toast"></div>
-<div class="lb" id="lb"><img id="lbImg" src="" alt="預覽大圖" /></div>
-<div class="modal-bg" id="authModal">
-  <div class="modal-box">
-    <h2>輸入伺服器 API Key</h2>
-    <div class="stats">此伺服器已啟用 `XBH_API_KEY` 驗證，請輸入金鑰（將儲存在本機瀏覽器 localStorage）。</div>
-    <input type="password" id="apiKeyInput" placeholder="輸入 XBH_API_KEY..." autocomplete="current-password" />
-    <div class="modal-err" id="authErr"></div>
-    <div class="controls" style="justify-content: flex-end;">
-      <button class="btn" id="clearKeyBtn" type="button">清除</button>
-      <button class="btn" id="cancelKeyBtn" type="button">關閉</button>
-      <button class="btn primary" id="saveKeyBtn" type="button">儲存並重試</button>
-    </div>
-  </div>
-</div>
+    const esc = s => String(s || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+    const KEY_STORAGE = "xbh_api_key";
 
-<script>
-const KIND_LABELS = { tutorial: "教學／工作流", showcase: "作品／展示", review: "評測／對比", news: "發布／新聞", question: "提問" };
-const state = { q: "", category: "", kind: "", model: "", sincePreset: "", status: "active", sort: "newest", masonry: false, limit: 60, offset: 0, total: 0 };
-const selectedIds = new Set();
-let currentPageIds = [];
+    function getApiKey() {
+      return localStorage.getItem(KEY_STORAGE) || "";
+    }
 
-const esc = s => String(s || "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" })[c]);
-const KEY_STORAGE = "xbh_api_key";
+    function withMediaKey(url) {
+      const key = getApiKey();
+      if (!key || !url || !url.startsWith("/")) return url;
+      const sep = url.includes("?") ? "&" : "?";
+      return `${url}${sep}api_key=${encodeURIComponent(key)}`;
+    }
 
-function getApiKey() {
-  return localStorage.getItem(KEY_STORAGE) || "";
-}
+    function openAuthModal(errMsg = "") {
+      document.getElementById("apiKeyInput").value = getApiKey();
+      document.getElementById("authErr").textContent = errMsg;
+      document.getElementById("authModal").classList.add("open");
+      setTimeout(() => document.getElementById("apiKeyInput").focus(), 30);
+    }
 
-function withMediaKey(url) {
-  const key = getApiKey();
-  if (!key || !url || !url.startsWith("/")) return url;
-  const sep = url.includes("?") ? "&" : "?";
-  return `${url}${sep}api_key=${encodeURIComponent(key)}`;
-}
+    async function apiFetch(url, opts = {}) {
+      const key = getApiKey();
+      const headers = new Headers(opts.headers || {});
+      if (key) headers.set("X-API-Key", key);
+      const res = await fetch(url, { ...opts, headers });
+      if (res.status === 401) {
+        openAuthModal("驗證失敗或尚未設定正確的 API Key (HTTP 401)");
+        throw new Error("Unauthorized");
+      }
+      return res;
+    }
 
-function openAuthModal(errMsg = "") {
-  document.getElementById("apiKeyInput").value = getApiKey();
-  document.getElementById("authErr").textContent = errMsg;
-  document.getElementById("authModal").classList.add("open");
-  setTimeout(() => document.getElementById("apiKeyInput").focus(), 30);
-}
+    function updateSelectionUi() {
+      const bar = document.getElementById("batchBar");
+      document.getElementById("batchCount").textContent = `已選取 ${selectedIds.size} 則`;
+      bar.classList.toggle("open", selectedIds.size > 0);
+      const allSelected = currentPageIds.length > 0 && currentPageIds.every(id => selectedIds.has(id));
+      document.getElementById("selectPageBtn").textContent = allSelected ? "取消全選本頁" : "全選本頁";
+      document.getElementById("batchPurgeBtn").style.display = state.status === "unbookmarked" ? "inline-block" : "none";
+    }
 
-async function apiFetch(url, opts = {}) {
-  const key = getApiKey();
-  const headers = new Headers(opts.headers || {});
-  if (key) headers.set("X-API-Key", key);
-  const res = await fetch(url, { ...opts, headers });
-  if (res.status === 401) {
-    openAuthModal("驗證失敗或尚未設定正確的 API Key (HTTP 401)");
-    throw new Error("Unauthorized");
-  }
-  return res;
-}
+    function updateQueueControls(pendingCount, unbookmarkedCount) {
+      document.getElementById("queueCountBadge").textContent = String(pendingCount || 0);
+      const qBtn = document.getElementById("queueViewBtn");
+      const isQueue = state.status === "pending_unbookmark";
+      const isUnbookmarked = state.status === "unbookmarked";
+      qBtn.classList.toggle("queue-active", isQueue);
+      qBtn.classList.toggle("queue-has", !isQueue && (pendingCount || 0) > 0);
+      const banner = document.getElementById("queueBanner");
+      banner.classList.toggle("open", isQueue);
+      if (isQueue) {
+        document.getElementById("queueBannerText").textContent =
+          `待取消收藏佇列（共 ${pendingCount || 0} 則）：可勾選或單筆「還原保留」，確認後再於 Chrome 擴充功能執行低風險限速取消收藏。`;
+      }
+      const uBanner = document.getElementById("unbookmarkedBanner");
+      uBanner.classList.toggle("open", isUnbookmarked);
+      if (isUnbookmarked && unbookmarkedCount !== undefined) {
+        document.getElementById("unbookmarkedBannerText").textContent =
+          `已取消收藏紀錄（共 ${unbookmarkedCount} 則）：這些貼文已從 X 取消收藏，可於此還原或永久清除紀錄與未共用圖片。`;
+      }
+      updateSelectionUi();
+    }
 
-function updateSelectionUi() {
-  const bar = document.getElementById("batchBar");
-  document.getElementById("batchCount").textContent = `已選取 ${selectedIds.size} 則`;
-  bar.classList.toggle("open", selectedIds.size > 0);
-  const allSelected = currentPageIds.length > 0 && currentPageIds.every(id => selectedIds.has(id));
-  document.getElementById("selectPageBtn").textContent = allSelected ? "取消全選本頁" : "全選本頁";
-  document.getElementById("batchPurgeBtn").style.display = state.status === "unbookmarked" ? "inline-block" : "none";
-}
+    function toast(msg) {
+      const el = document.getElementById("toast");
+      el.textContent = msg;
+      el.style.display = "block";
+      clearTimeout(window.__toastT);
+      window.__toastT = setTimeout(() => { el.style.display = "none"; }, 4500);
+    }
 
-function updateQueueControls(pendingCount, unbookmarkedCount) {
-  document.getElementById("queueCountBadge").textContent = String(pendingCount || 0);
-  const qBtn = document.getElementById("queueViewBtn");
-  const isQueue = state.status === "pending_unbookmark";
-  const isUnbookmarked = state.status === "unbookmarked";
-  qBtn.classList.toggle("queue-active", isQueue);
-  qBtn.classList.toggle("queue-has", !isQueue && (pendingCount || 0) > 0);
-  const banner = document.getElementById("queueBanner");
-  banner.classList.toggle("open", isQueue);
-  if (isQueue) {
-    document.getElementById("queueBannerText").textContent =
-      `待取消收藏佇列（共 ${pendingCount || 0} 則）：可勾選或單筆「還原保留」，確認後再於 Chrome 擴充功能執行低風險限速取消收藏。`;
-  }
-  const uBanner = document.getElementById("unbookmarkedBanner");
-  uBanner.classList.toggle("open", isUnbookmarked);
-  if (isUnbookmarked && unbookmarkedCount !== undefined) {
-    document.getElementById("unbookmarkedBannerText").textContent =
-      `已取消收藏紀錄（共 ${unbookmarkedCount} 則）：這些貼文已從 X 取消收藏，可於此還原或永久清除紀錄與未共用圖片。`;
-  }
-  updateSelectionUi();
-}
+    function computeSince(preset) {
+      if (!preset) return "";
+      const d = new Date();
+      if (preset === "30d") d.setDate(d.getDate() - 30);
+      if (preset === "6m") d.setMonth(d.getMonth() - 6);
+      return d.toISOString().slice(0, 10);
+    }
 
-function toast(msg) {
-  const el = document.getElementById("toast");
-  el.textContent = msg;
-  el.style.display = "block";
-  clearTimeout(window.__toastT);
-  window.__toastT = setTimeout(() => { el.style.display = "none"; }, 4500);
-}
+    async function fetchStats() {
+      try {
+        const res = await apiFetch("/api/stats");
+        const s = await res.json();
+        document.getElementById("statsLine").textContent =
+          `總書籤 ${s.total} 則｜有內文 ${s.with_text} 則｜本機有圖 ${s.with_local_media} 則｜待取消 ${s.pending_unbookmark} 則｜已取消 ${s.unbookmarked || 0} 則｜時間 ${s.earliest ? s.earliest.slice(0, 10) : "-"} ～ ${s.latest ? s.latest.slice(0, 10) : "-"}`;
+        updateQueueControls(s.pending_unbookmark || 0, s.unbookmarked || 0);
+      } catch (e) {
+        if (e.message !== "Unauthorized") throw e;
+      }
+    }
 
-function computeSince(preset) {
-  if (!preset) return "";
-  const d = new Date();
-  if (preset === "30d") d.setDate(d.getDate() - 30);
-  if (preset === "6m") d.setMonth(d.getMonth() - 6);
-  return d.toISOString().slice(0, 10);
-}
+    function renderFacets(facets) {
+      const cats = facets.categories || [];
+      const kinds = (facets.kinds || []).filter(k => k.name !== "未指定");
+      const models = facets.models || [];
 
-async function fetchStats() {
-  try {
-    const res = await apiFetch("/api/stats");
-    const s = await res.json();
-    document.getElementById("statsLine").textContent =
-      `總書籤 ${s.total} 則｜有內文 ${s.with_text} 則｜本機有圖 ${s.with_local_media} 則｜待取消 ${s.pending_unbookmark} 則｜已取消 ${s.unbookmarked || 0} 則｜時間 ${s.earliest ? s.earliest.slice(0,10) : "-"} ～ ${s.latest ? s.latest.slice(0,10) : "-"}`;
-    updateQueueControls(s.pending_unbookmark || 0, s.unbookmarked || 0);
-  } catch (e) {
-    if (e.message !== "Unauthorized") throw e;
-  }
-}
+      document.getElementById("catChips").innerHTML = `<span class="stats">分類：</span>` +
+        `<button class="chip ${state.category === "" ? "on" : ""}" data-type="category" data-val="">全部</button>` +
+        cats.map(c => {
+          const val = c.name === "未分類" ? "__uncategorized__" : c.name;
+          return `<button class="chip ${state.category === val ? "on" : ""}" data-type="category" data-val="${esc(val)}">${esc(c.name)} (${c.count})</button>`;
+        }).join("");
 
-function renderFacets(facets) {
-  const cats = facets.categories || [];
-  const kinds = (facets.kinds || []).filter(k => k.name !== "未指定");
-  const models = facets.models || [];
+      document.getElementById("kindChips").innerHTML = kinds.length ? `<span class="stats">類型：</span>` +
+        `<button class="chip ${state.kind === "" ? "on" : ""}" data-type="kind" data-val="">全部</button>` +
+        kinds.map(k => `<button class="chip ${state.kind === k.name ? "on" : ""}" data-type="kind" data-val="${esc(k.name)}">${esc(KIND_LABELS[k.name] || k.name)} (${k.count})</button>`).join("") : "";
 
-  document.getElementById("catChips").innerHTML = `<span class="stats">分類：</span>` +
-    `<button class="chip ${state.category === "" ? "on" : ""}" data-type="category" data-val="">全部</button>` +
-    cats.map(c => {
-      const val = c.name === "未分類" ? "__uncategorized__" : c.name;
-      return `<button class="chip ${state.category === val ? "on" : ""}" data-type="category" data-val="${esc(val)}">${esc(c.name)} (${c.count})</button>`;
-    }).join("");
+      document.getElementById("modelChips").innerHTML = models.length ? `<span class="stats">模型：</span>` +
+        models.slice(0, 22).map(m => `<button class="chip h3 ${state.model === m.name ? "on" : ""}" data-type="model" data-val="${esc(m.name)}">${esc(m.name)} (${m.count})</button>`).join("") : "";
 
-  document.getElementById("kindChips").innerHTML = kinds.length ? `<span class="stats">類型：</span>` +
-    `<button class="chip ${state.kind === "" ? "on" : ""}" data-type="kind" data-val="">全部</button>` +
-    kinds.map(k => `<button class="chip ${state.kind === k.name ? "on" : ""}" data-type="kind" data-val="${esc(k.name)}">${esc(KIND_LABELS[k.name] || k.name)} (${k.count})</button>`).join("") : "";
+      document.querySelectorAll("[data-type]").forEach(btn => {
+        btn.onclick = () => {
+          const t = btn.dataset.type, v = btn.dataset.val;
+          state[t] = (state[t] === v && v !== "") ? "" : v;
+          state.offset = 0;
+          loadBookmarks();
+        };
+      });
+    }
 
-  document.getElementById("modelChips").innerHTML = models.length ? `<span class="stats">模型：</span>` +
-    models.slice(0, 22).map(m => `<button class="chip h3 ${state.model === m.name ? "on" : ""}" data-type="model" data-val="${esc(m.name)}">${esc(m.name)} (${m.count})</button>`).join("") : "";
+    async function loadBookmarks() {
+      const params = new URLSearchParams({
+        q: state.q,
+        category: state.category,
+        kind: state.kind,
+        model: state.model,
+        since: computeSince(state.sincePreset),
+        status: state.status,
+        sort: state.sort,
+        limit: String(state.limit),
+        offset: String(state.offset),
+      });
+      let data;
+      try {
+        const res = await apiFetch(`/api/bookmarks?${params.toString()}`);
+        data = await res.json();
+      } catch (e) {
+        if (e.message === "Unauthorized") return;
+        throw e;
+      }
+      state.total = data.total || 0;
+      renderFacets(data.facets || {});
 
-  document.querySelectorAll("[data-type]").forEach(btn => {
-    btn.onclick = () => {
-      const t = btn.dataset.type, v = btn.dataset.val;
-      state[t] = (state[t] === v && v !== "") ? "" : v;
-      state.offset = 0;
-      loadBookmarks();
-    };
-  });
-}
+      const grid = document.getElementById("grid");
+      grid.className = state.masonry ? "grid masonry" : "grid";
+      const start = state.total ? state.offset + 1 : 0;
+      const end = Math.min(state.offset + state.limit, state.total);
+      document.getElementById("resultInfo").textContent = `顯示第 ${start}–${end} 則，共符合 ${state.total} 則`;
+      renderPagination();
 
-async function loadBookmarks() {
-  const params = new URLSearchParams({
-    q: state.q,
-    category: state.category,
-    kind: state.kind,
-    model: state.model,
-    since: computeSince(state.sincePreset),
-    status: state.status,
-    sort: state.sort,
-    limit: String(state.limit),
-    offset: String(state.offset),
-  });
-  let data;
-  try {
-    const res = await apiFetch(`/api/bookmarks?${params.toString()}`);
-    data = await res.json();
-  } catch (e) {
-    if (e.message === "Unauthorized") return;
-    throw e;
-  }
-  state.total = data.total || 0;
-  renderFacets(data.facets || {});
+      grid.innerHTML = (data.items || []).map(x => {
+        const mediaList = (x.local_media && x.local_media.length)
+          ? x.local_media.map(m => m.startsWith("http") ? m : withMediaKey(`/${m}`))
+          : (x.media_urls || []);
+        const isPending = x.sync_status === "pending_unbookmark";
+        const isUnbookmarked = x.sync_status === "unbookmarked";
+        const isSelected = selectedIds.has(x.tweet_id);
+        const statusBtn = isUnbookmarked
+          ? `<span style="display:inline-flex;gap:6px;"><button class="mini-btn restore" data-status-id="${esc(x.tweet_id)}" data-next="active">還原保留</button><button class="mini-btn danger" data-purge-id="${esc(x.tweet_id)}">永久刪除</button></span>`
+          : isPending
+            ? `<button class="mini-btn restore" data-status-id="${esc(x.tweet_id)}" data-next="active">還原保留</button>`
+            : `<button class="mini-btn danger" data-status-id="${esc(x.tweet_id)}" data-next="pending_unbookmark">標記取消收藏</button>`;
+        const rawText = (x.text || "").trim();
+    const hasCurated = Boolean(x.title || x.summary);
+    const lineCount = rawText ? rawText.split("\n").length : 0;
+    const isLong = rawText.length > 110 || lineCount > 3;
+    const quotedHtml = x.quoted_text
+      ? `<div class="q">${x.quoted_author ? esc(x.quoted_author) + "：" : ""}${esc(x.quoted_text)}</div>`
+      : "";
+    const linksList = (x.external_links || []).filter(l => l && l.url);
+    const linksHtml = linksList.length
+      ? `<div class="ext-links">${linksList.map(l => `<div>🔗 <a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.text || l.card_text || l.url)}</a></div>`).join("")}</div>`
+      : "";
 
-  const grid = document.getElementById("grid");
-  grid.className = state.masonry ? "grid masonry" : "grid";
-  const start = state.total ? state.offset + 1 : 0;
-  const end = Math.min(state.offset + state.limit, state.total);
-  document.getElementById("resultInfo").textContent = `顯示第 ${start}–${end} 則，共符合 ${state.total} 則`;
-  renderPagination();
+    let bodyContentHtml = "";
+    if (hasCurated) {
+      const hasOrig = Boolean(rawText || quotedHtml || linksHtml);
+      bodyContentHtml =
+        `${x.title ? `<h2 class="title">${esc(x.title)}</h2>` : ""}` +
+        `${x.summary ? `<p class="sum">${esc(x.summary)}</p>` : ""}` +
+        (hasOrig
+          ? `<details class="orig"><summary>展開完整原文${x.quoted_text ? "與引用" : ""}</summary><div class="orig-text">${esc(rawText || "（無文字）")}</div>${quotedHtml}${linksHtml}</details>`
+          : "");
+    } else if (!rawText) {
+      bodyContentHtml =
+        `<div class="sum">（僅有連結／尚待補齊內文，可用 cli.py enrich --only-missing 補齊）</div>` +
+        ((quotedHtml || linksHtml)
+          ? `<details class="orig"><summary>展開引用與連結</summary>${quotedHtml}${linksHtml}</details>`
+          : "");
+    } else if (isLong || quotedHtml || linksHtml) {
+      bodyContentHtml =
+        `<div class="snippet">${esc(rawText)}</div>` +
+        `<details class="orig"><summary>展開完整內文${x.quoted_text ? "與引用" : ""}</summary><div class="orig-text">${esc(rawText)}</div>${quotedHtml}${linksHtml}</details>`;
+    } else {
+      bodyContentHtml = `<div class="txt">${esc(rawText)}</div>`;
+    }
 
-  grid.innerHTML = (data.items || []).map(x => {
-    const mediaList = (x.local_media && x.local_media.length)
-      ? x.local_media.map(m => m.startsWith("http") ? m : withMediaKey(`/${m}`))
-      : (x.media_urls || []);
-    const isPending = x.sync_status === "pending_unbookmark";
-    const isUnbookmarked = x.sync_status === "unbookmarked";
-    const isSelected = selectedIds.has(x.tweet_id);
-    const statusBtn = isUnbookmarked
-      ? `<span style="display:inline-flex;gap:6px;"><button class="mini-btn restore" data-status-id="${esc(x.tweet_id)}" data-next="active">還原保留</button><button class="mini-btn danger" data-purge-id="${esc(x.tweet_id)}">永久刪除</button></span>`
-      : isPending
-        ? `<button class="mini-btn restore" data-status-id="${esc(x.tweet_id)}" data-next="active">還原保留</button>`
-        : `<button class="mini-btn danger" data-status-id="${esc(x.tweet_id)}" data-next="pending_unbookmark">標記取消收藏</button>`;
     return `
       <article class="card ${isPending ? "pending" : ""} ${isSelected ? "selected" : ""}">
         ${mediaList.length ? `<div class="media">${mediaList.slice(0, 4).map(src => `<img loading="lazy" src="${esc(src)}" alt="" onerror="this.style.display='none'">`).join("")}</div>` : ""}
@@ -387,10 +916,7 @@ async function loadBookmarks() {
             ${x.like_count ? `<span>♥ ${x.like_count}</span>` : ""}
             <label class="sel-box"><input type="checkbox" data-select-id="${esc(x.tweet_id)}" ${isSelected ? "checked" : ""}/> 選取</label>
           </div>
-          ${x.title ? `<h2 class="title">${esc(x.title)}</h2>` : ""}
-          ${x.summary ? `<p class="sum">${esc(x.summary)}</p>` : ""}
-          <div class="txt">${esc(x.text || "（僅有連結／尚待補齊內文，可用增量重掃或 cli.py enrich 補齊）")}</div>
-          ${x.quoted_text ? `<div class="q">${x.quoted_author ? esc(x.quoted_author) + "：" : ""}${esc(x.quoted_text)}</div>` : ""}
+          ${bodyContentHtml}
           <div class="tags">${(x.models || []).map(m => `<span class="tag">${esc(m)}</span>`).join("")} <span class="tag">${esc(x.author_handle || "")}</span></div>
           <div class="foot">
             ${statusBtn}
@@ -399,278 +925,289 @@ async function loadBookmarks() {
         </div>
       </article>
     `;
-  }).join("");
+      }).join("");
 
-  currentPageIds = (data.items || []).map(x => x.tweet_id);
-  updateSelectionUi();
-
-  grid.querySelectorAll("img").forEach(img => {
-    img.onclick = () => {
-      document.getElementById("lbImg").src = img.src;
-      document.getElementById("lb").classList.add("open");
-    };
-  });
-
-  grid.querySelectorAll("[data-select-id]").forEach(cb => {
-    cb.onchange = () => {
-      const tid = cb.dataset.selectId;
-      if (cb.checked) selectedIds.add(tid);
-      else selectedIds.delete(tid);
-      cb.closest(".card")?.classList.toggle("selected", cb.checked);
+      currentPageIds = (data.items || []).map(x => x.tweet_id);
       updateSelectionUi();
-    };
-  });
 
-  grid.querySelectorAll("[data-status-id]").forEach(btn => {
-    btn.onclick = async () => {
-      const tid = btn.dataset.statusId;
-      const next = btn.dataset.next;
-      await apiFetch(`/api/bookmarks/${encodeURIComponent(tid)}/status`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sync_status: next }),
+      grid.querySelectorAll("img").forEach(img => {
+        img.onclick = () => {
+          document.getElementById("lbImg").src = img.src;
+          document.getElementById("lb").classList.add("open");
+        };
       });
-      selectedIds.delete(tid);
-      await Promise.all([fetchStats(), loadBookmarks()]);
-    };
-  });
 
-  grid.querySelectorAll("[data-purge-id]").forEach(btn => {
-    btn.onclick = async () => {
-      const tid = btn.dataset.purgeId;
-      if (!confirm("確定要從伺服器永久刪除此筆已取消收藏紀錄（含未共用的本機圖片）嗎？")) return;
+      grid.querySelectorAll("[data-select-id]").forEach(cb => {
+        cb.onchange = () => {
+          const tid = cb.dataset.selectId;
+          if (cb.checked) selectedIds.add(tid);
+          else selectedIds.delete(tid);
+          cb.closest(".card")?.classList.toggle("selected", cb.checked);
+          updateSelectionUi();
+        };
+      });
+
+      grid.querySelectorAll("[data-status-id]").forEach(btn => {
+        btn.onclick = async () => {
+          const tid = btn.dataset.statusId;
+          const next = btn.dataset.next;
+          await apiFetch(`/api/bookmarks/${encodeURIComponent(tid)}/status`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sync_status: next }),
+          });
+          selectedIds.delete(tid);
+          await Promise.all([fetchStats(), loadBookmarks()]);
+        };
+      });
+
+      grid.querySelectorAll("[data-purge-id]").forEach(btn => {
+        btn.onclick = async () => {
+          const tid = btn.dataset.purgeId;
+          if (!confirm("確定要從伺服器永久刪除此筆已取消收藏紀錄（含未共用的本機圖片）嗎？")) return;
+          const res = await apiFetch("/api/bookmarks/purge-unbookmarked", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tweet_ids: [tid], delete_media: true }),
+          });
+          const r = await res.json();
+          selectedIds.delete(tid);
+          toast(`已永久清除 ${r.deleted || 0} 則紀錄與 ${r.media_deleted || 0} 個圖片檔`);
+          await Promise.all([fetchStats(), loadBookmarks()]);
+        };
+      });
+    }
+
+    function getTotalPages() {
+      return Math.max(1, Math.ceil(state.total / state.limit));
+    }
+
+    function goToPage(pageNum, scrollTop = false) {
+      const totalPages = getTotalPages();
+      const p = Math.min(totalPages, Math.max(1, Number(pageNum) || 1));
+      state.offset = (p - 1) * state.limit;
+      loadBookmarks();
+      if (scrollTop) {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    }
+
+    function renderPagination() {
+      const totalPages = getTotalPages();
+      const curPage = Math.min(totalPages, Math.floor(state.offset / state.limit) + 1);
+
+      const pages = [];
+      const addPage = p => { if (!pages.includes(p)) pages.push(p); };
+      addPage(1);
+      for (let p = Math.max(1, curPage - 2); p <= Math.min(totalPages, curPage + 2); p++) addPage(p);
+      addPage(totalPages);
+      pages.sort((a, b) => a - b);
+
+      const numParts = [];
+      let prev = 0;
+      for (const p of pages) {
+        if (prev && p - prev > 1) numParts.push(`<span class="page-ellipsis">…</span>`);
+        numParts.push(`<button class="btn ${p === curPage ? "primary" : ""}" data-page="${p}" type="button">${p}</button>`);
+        prev = p;
+      }
+
+      const pagerHtml = `
+        <button class="btn" data-action="first" type="button" ${curPage <= 1 ? "disabled" : ""}>« 首頁</button>
+        <button class="btn" data-action="prev" type="button" ${curPage <= 1 ? "disabled" : ""}>‹ 上一頁</button>
+        <span class="page-nums">${numParts.join("")}</span>
+        <button class="btn" data-action="next" type="button" ${curPage >= totalPages ? "disabled" : ""}>下一頁 ›</button>
+        <button class="btn" data-action="last" type="button" ${curPage >= totalPages ? "disabled" : ""}>末頁 »</button>
+        <span class="page-jump">
+          跳至 <input type="number" class="jump-input" min="1" max="${totalPages}" value="${curPage}" /> / <span>${totalPages}</span> 頁
+          <button class="btn" data-action="jump" type="button">前往</button>
+        </span>
+      `;
+
+      document.querySelectorAll(".pager").forEach(pagerEl => {
+        pagerEl.innerHTML = pagerHtml;
+        const shouldScroll = pagerEl.classList.contains("bottom");
+        const jumpInput = pagerEl.querySelector(".jump-input");
+        pagerEl.querySelectorAll("[data-page]").forEach(btn => {
+          btn.onclick = () => goToPage(Number(btn.dataset.page), shouldScroll);
+        });
+        pagerEl.querySelector('[data-action="first"]').onclick = () => goToPage(1, shouldScroll);
+        pagerEl.querySelector('[data-action="prev"]').onclick = () => goToPage(curPage - 1, shouldScroll);
+        pagerEl.querySelector('[data-action="next"]').onclick = () => goToPage(curPage + 1, shouldScroll);
+        pagerEl.querySelector('[data-action="last"]').onclick = () => goToPage(totalPages, shouldScroll);
+        pagerEl.querySelector('[data-action="jump"]').onclick = () => goToPage(jumpInput.value, shouldScroll);
+        jumpInput.addEventListener("keydown", e => {
+          if (e.key === "Enter") goToPage(jumpInput.value, shouldScroll);
+        });
+      });
+    }
+
+    let searchTimer = null;
+    document.getElementById("searchInput").oninput = e => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => { state.q = e.target.value; state.offset = 0; loadBookmarks(); }, 220);
+    };
+    document.getElementById("sinceSelect").onchange = e => { state.sincePreset = e.target.value; state.offset = 0; loadBookmarks(); };
+    document.getElementById("statusSelect").onchange = e => { state.status = e.target.value; state.offset = 0; Promise.all([fetchStats(), loadBookmarks()]); };
+    document.getElementById("queueViewBtn").onclick = () => {
+      state.status = state.status === "pending_unbookmark" ? "active" : "pending_unbookmark";
+      document.getElementById("statusSelect").value = state.status;
+      state.offset = 0;
+      Promise.all([fetchStats(), loadBookmarks()]);
+    };
+    document.getElementById("queueBackBtn").onclick = () => {
+      state.status = "active";
+      document.getElementById("statusSelect").value = "active";
+      state.offset = 0;
+      Promise.all([fetchStats(), loadBookmarks()]);
+    };
+    document.getElementById("unbookmarkedBackBtn").onclick = () => {
+      state.status = "active";
+      document.getElementById("statusSelect").value = "active";
+      state.offset = 0;
+      Promise.all([fetchStats(), loadBookmarks()]);
+    };
+    document.getElementById("purgeAllUnbookmarkedBtn").onclick = async () => {
+      if (!confirm("確定要永久清除所有「已取消收藏」的伺服器紀錄及未共用的本機圖片嗎？此操作無法復原。")) return;
       const res = await apiFetch("/api/bookmarks/purge-unbookmarked", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tweet_ids: [tid], delete_media: true }),
+        body: JSON.stringify({ delete_media: true }),
       });
       const r = await res.json();
-      selectedIds.delete(tid);
+      selectedIds.clear();
+      state.offset = 0;
       toast(`已永久清除 ${r.deleted || 0} 則紀錄與 ${r.media_deleted || 0} 個圖片檔`);
       await Promise.all([fetchStats(), loadBookmarks()]);
     };
-  });
-}
+    document.getElementById("queueRestoreAllBtn").onclick = async () => {
+      if (!confirm("確定要將所有待取消收藏的書籤還原為有效保留嗎？")) return;
+      const qRes = await apiFetch("/api/unbookmark-queue");
+      const qData = await qRes.json();
+      const ids = (qData.items || []).map(x => x.tweet_id);
+      if (!ids.length) { toast("目前沒有待取消收藏的項目"); return; }
+      const res = await apiFetch("/api/bookmarks/batch-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tweet_ids: ids, sync_status: "active" }),
+      });
+      const r = await res.json();
+      selectedIds.clear();
+      toast(`已還原 ${r.updated || 0} 則書籤為有效保留`);
+      await Promise.all([fetchStats(), loadBookmarks()]);
+    };
+    function toggleSelectPage(forceSelect) {
+      const allSelected = currentPageIds.length > 0 && currentPageIds.every(id => selectedIds.has(id));
+      const shouldSelect = forceSelect !== undefined ? forceSelect : !allSelected;
+      currentPageIds.forEach(id => { if (shouldSelect) selectedIds.add(id); else selectedIds.delete(id); });
+      document.querySelectorAll("[data-select-id]").forEach(cb => {
+        const checked = selectedIds.has(cb.dataset.selectId);
+        cb.checked = checked;
+        cb.closest(".card")?.classList.toggle("selected", checked);
+      });
+      updateSelectionUi();
+    }
+    async function applyBatchStatus(syncStatus, label) {
+      const ids = [...selectedIds];
+      if (!ids.length) return;
+      const res = await apiFetch("/api/bookmarks/batch-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tweet_ids: ids, sync_status: syncStatus }),
+      });
+      const r = await res.json();
+      selectedIds.clear();
+      toast(`${label}完成：更新 ${r.updated || 0} 則`);
+      await Promise.all([fetchStats(), loadBookmarks()]);
+    }
+    document.getElementById("selectPageBtn").onclick = () => toggleSelectPage();
+    document.getElementById("batchSelectPageBtn").onclick = () => toggleSelectPage(true);
+    document.getElementById("batchClearBtn").onclick = () => {
+      selectedIds.clear();
+      document.querySelectorAll("[data-select-id]").forEach(cb => {
+        cb.checked = false;
+        cb.closest(".card")?.classList.remove("selected");
+      });
+      updateSelectionUi();
+    };
+    document.getElementById("batchMarkBtn").onclick = () => applyBatchStatus("pending_unbookmark", "批次標記取消收藏");
+    document.getElementById("batchRestoreBtn").onclick = () => applyBatchStatus("active", "批次還原保留");
+    document.getElementById("batchPurgeBtn").onclick = async () => {
+      const ids = [...selectedIds];
+      if (!ids.length) return;
+      if (!confirm(`確定要從伺服器永久刪除這 ${ids.length} 則已取消收藏紀錄（含未共用圖片）嗎？`)) return;
+      const res = await apiFetch("/api/bookmarks/purge-unbookmarked", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tweet_ids: ids, delete_media: true }),
+      });
+      const r = await res.json();
+      selectedIds.clear();
+      toast(`已永久清除 ${r.deleted || 0} 則紀錄與 ${r.media_deleted || 0} 個圖片檔`);
+      await Promise.all([fetchStats(), loadBookmarks()]);
+    };
+    document.getElementById("sortSelect").onchange = e => { state.sort = e.target.value; state.offset = 0; loadBookmarks(); };
+    document.getElementById("layoutBtn").onclick = () => { state.masonry = !state.masonry; loadBookmarks(); };
+    document.getElementById("themeBtn").onclick = () => { const r = document.documentElement; r.dataset.theme = r.dataset.theme === "dark" ? "light" : "dark"; };
 
-function getTotalPages() {
-  return Math.max(1, Math.ceil(state.total / state.limit));
-}
+    document.getElementById("classifyBtn").onclick = async () => {
+      toast("正在執行規則分類...");
+      const res = await apiFetch("/api/classify", { method: "POST" });
+      const r = await res.json();
+      toast(`規則分類完成：更新 ${r.updated || 0} 則`);
+      await Promise.all([fetchStats(), loadBookmarks()]);
+    };
 
-function goToPage(pageNum) {
-  const totalPages = getTotalPages();
-  const p = Math.min(totalPages, Math.max(1, Number(pageNum) || 1));
-  state.offset = (p - 1) * state.limit;
-  loadBookmarks();
-  window.scrollTo({ top: 0, behavior: "smooth" });
-}
+    async function triggerExport(fmt) {
+      toast(`正在匯出 ${fmt.toUpperCase()}...`);
+      const res = await apiFetch("/api/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          format: fmt,
+          q: state.q,
+          category: state.category,
+          kind: state.kind,
+          model: state.model,
+          since: computeSince(state.sincePreset),
+          status: state.status,
+        }),
+      });
+      const r = await res.json();
+      if (r.download_url) {
+        toast(`匯出完成（${r.count} 則）：${r.path}`);
+        window.open(withMediaKey(r.download_url), "_blank");
+      } else {
+        toast(`Obsidian Vault 匯出完成（${r.notes} 篇筆記）：${r.path}`);
+      }
+    }
 
-function renderPagination() {
-  const totalPages = getTotalPages();
-  const curPage = Math.min(totalPages, Math.floor(state.offset / state.limit) + 1);
-  document.getElementById("firstBtn").disabled = curPage <= 1;
-  document.getElementById("prevBtn").disabled = curPage <= 1;
-  document.getElementById("nextBtn").disabled = curPage >= totalPages;
-  document.getElementById("lastBtn").disabled = curPage >= totalPages;
-  document.getElementById("totalPagesSpan").textContent = String(totalPages);
-  const jumpInput = document.getElementById("jumpPageInput");
-  jumpInput.max = String(totalPages);
-  jumpInput.value = String(curPage);
+    document.getElementById("keyBtn").onclick = () => openAuthModal();
+    document.getElementById("cancelKeyBtn").onclick = () => document.getElementById("authModal").classList.remove("open");
+    document.getElementById("clearKeyBtn").onclick = () => {
+      localStorage.removeItem(KEY_STORAGE);
+      document.getElementById("apiKeyInput").value = "";
+      document.getElementById("authModal").classList.remove("open");
+      toast("已清除儲存的 API Key");
+    };
+    document.getElementById("saveKeyBtn").onclick = async () => {
+      const val = document.getElementById("apiKeyInput").value.trim();
+      if (val) localStorage.setItem(KEY_STORAGE, val);
+      else localStorage.removeItem(KEY_STORAGE);
+      document.getElementById("authModal").classList.remove("open");
+      await Promise.all([fetchStats(), loadBookmarks()]);
+    };
+    document.getElementById("apiKeyInput").addEventListener("keydown", e => {
+      if (e.key === "Enter") document.getElementById("saveKeyBtn").click();
+    });
 
-  const pages = [];
-  const addPage = p => { if (!pages.includes(p)) pages.push(p); };
-  addPage(1);
-  for (let p = Math.max(1, curPage - 2); p <= Math.min(totalPages, curPage + 2); p++) addPage(p);
-  addPage(totalPages);
-  pages.sort((a, b) => a - b);
+    document.getElementById("exportHtmlBtn").onclick = () => triggerExport("html");
+    document.getElementById("exportObsBtn").onclick = () => triggerExport("obsidian");
+    document.getElementById("lb").onclick = () => document.getElementById("lb").classList.remove("open");
+    document.addEventListener("keydown", e => { if (e.key === "Escape") document.getElementById("lb").classList.remove("open"); });
 
-  const parts = [];
-  let prev = 0;
-  for (const p of pages) {
-    if (prev && p - prev > 1) parts.push(`<span class="page-ellipsis">…</span>`);
-    parts.push(`<button class="btn ${p === curPage ? "primary" : ""}" data-page="${p}" type="button">${p}</button>`);
-    prev = p;
-  }
-  const container = document.getElementById("pageNums");
-  container.innerHTML = parts.join("");
-  container.querySelectorAll("[data-page]").forEach(btn => {
-    btn.onclick = () => goToPage(Number(btn.dataset.page));
-  });
-}
-
-let searchTimer = null;
-document.getElementById("searchInput").oninput = e => {
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => { state.q = e.target.value; state.offset = 0; loadBookmarks(); }, 220);
-};
-document.getElementById("sinceSelect").onchange = e => { state.sincePreset = e.target.value; state.offset = 0; loadBookmarks(); };
-document.getElementById("statusSelect").onchange = e => { state.status = e.target.value; state.offset = 0; Promise.all([fetchStats(), loadBookmarks()]); };
-document.getElementById("queueViewBtn").onclick = () => {
-  state.status = state.status === "pending_unbookmark" ? "active" : "pending_unbookmark";
-  document.getElementById("statusSelect").value = state.status;
-  state.offset = 0;
-  Promise.all([fetchStats(), loadBookmarks()]);
-};
-document.getElementById("queueBackBtn").onclick = () => {
-  state.status = "active";
-  document.getElementById("statusSelect").value = "active";
-  state.offset = 0;
-  Promise.all([fetchStats(), loadBookmarks()]);
-};
-document.getElementById("unbookmarkedBackBtn").onclick = () => {
-  state.status = "active";
-  document.getElementById("statusSelect").value = "active";
-  state.offset = 0;
-  Promise.all([fetchStats(), loadBookmarks()]);
-};
-document.getElementById("purgeAllUnbookmarkedBtn").onclick = async () => {
-  if (!confirm("確定要永久清除所有「已取消收藏」的伺服器紀錄及未共用的本機圖片嗎？此操作無法復原。")) return;
-  const res = await apiFetch("/api/bookmarks/purge-unbookmarked", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ delete_media: true }),
-  });
-  const r = await res.json();
-  selectedIds.clear();
-  state.offset = 0;
-  toast(`已永久清除 ${r.deleted || 0} 則紀錄與 ${r.media_deleted || 0} 個圖片檔`);
-  await Promise.all([fetchStats(), loadBookmarks()]);
-};
-document.getElementById("queueRestoreAllBtn").onclick = async () => {
-  if (!confirm("確定要將所有待取消收藏的書籤還原為有效保留嗎？")) return;
-  const qRes = await apiFetch("/api/unbookmark-queue");
-  const qData = await qRes.json();
-  const ids = (qData.items || []).map(x => x.tweet_id);
-  if (!ids.length) { toast("目前沒有待取消收藏的項目"); return; }
-  const res = await apiFetch("/api/bookmarks/batch-status", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tweet_ids: ids, sync_status: "active" }),
-  });
-  const r = await res.json();
-  selectedIds.clear();
-  toast(`已還原 ${r.updated || 0} 則書籤為有效保留`);
-  await Promise.all([fetchStats(), loadBookmarks()]);
-};
-function toggleSelectPage(forceSelect) {
-  const allSelected = currentPageIds.length > 0 && currentPageIds.every(id => selectedIds.has(id));
-  const shouldSelect = forceSelect !== undefined ? forceSelect : !allSelected;
-  currentPageIds.forEach(id => { if (shouldSelect) selectedIds.add(id); else selectedIds.delete(id); });
-  document.querySelectorAll("[data-select-id]").forEach(cb => {
-    const checked = selectedIds.has(cb.dataset.selectId);
-    cb.checked = checked;
-    cb.closest(".card")?.classList.toggle("selected", checked);
-  });
-  updateSelectionUi();
-}
-async function applyBatchStatus(syncStatus, label) {
-  const ids = [...selectedIds];
-  if (!ids.length) return;
-  const res = await apiFetch("/api/bookmarks/batch-status", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tweet_ids: ids, sync_status: syncStatus }),
-  });
-  const r = await res.json();
-  selectedIds.clear();
-  toast(`${label}完成：更新 ${r.updated || 0} 則`);
-  await Promise.all([fetchStats(), loadBookmarks()]);
-}
-document.getElementById("selectPageBtn").onclick = () => toggleSelectPage();
-document.getElementById("batchSelectPageBtn").onclick = () => toggleSelectPage(true);
-document.getElementById("batchClearBtn").onclick = () => {
-  selectedIds.clear();
-  document.querySelectorAll("[data-select-id]").forEach(cb => {
-    cb.checked = false;
-    cb.closest(".card")?.classList.remove("selected");
-  });
-  updateSelectionUi();
-};
-document.getElementById("batchMarkBtn").onclick = () => applyBatchStatus("pending_unbookmark", "批次標記取消收藏");
-document.getElementById("batchRestoreBtn").onclick = () => applyBatchStatus("active", "批次還原保留");
-document.getElementById("batchPurgeBtn").onclick = async () => {
-  const ids = [...selectedIds];
-  if (!ids.length) return;
-  if (!confirm(`確定要從伺服器永久刪除這 ${ids.length} 則已取消收藏紀錄（含未共用圖片）嗎？`)) return;
-  const res = await apiFetch("/api/bookmarks/purge-unbookmarked", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tweet_ids: ids, delete_media: true }),
-  });
-  const r = await res.json();
-  selectedIds.clear();
-  toast(`已永久清除 ${r.deleted || 0} 則紀錄與 ${r.media_deleted || 0} 個圖片檔`);
-  await Promise.all([fetchStats(), loadBookmarks()]);
-};
-document.getElementById("sortSelect").onchange = e => { state.sort = e.target.value; state.offset = 0; loadBookmarks(); };
-document.getElementById("layoutBtn").onclick = () => { state.masonry = !state.masonry; loadBookmarks(); };
-document.getElementById("themeBtn").onclick = () => { const r = document.documentElement; r.dataset.theme = r.dataset.theme === "dark" ? "light" : "dark"; };
-document.getElementById("firstBtn").onclick = () => goToPage(1);
-document.getElementById("prevBtn").onclick = () => goToPage(Math.floor(state.offset / state.limit));
-document.getElementById("nextBtn").onclick = () => goToPage(Math.floor(state.offset / state.limit) + 2);
-document.getElementById("lastBtn").onclick = () => goToPage(getTotalPages());
-document.getElementById("jumpPageBtn").onclick = () => goToPage(document.getElementById("jumpPageInput").value);
-document.getElementById("jumpPageInput").addEventListener("keydown", e => {
-  if (e.key === "Enter") goToPage(e.target.value);
-});
-
-document.getElementById("classifyBtn").onclick = async () => {
-  toast("正在執行規則分類...");
-  const res = await apiFetch("/api/classify", { method: "POST" });
-  const r = await res.json();
-  toast(`規則分類完成：更新 ${r.updated || 0} 則`);
-  await Promise.all([fetchStats(), loadBookmarks()]);
-};
-
-async function triggerExport(fmt) {
-  toast(`正在匯出 ${fmt.toUpperCase()}...`);
-  const res = await apiFetch("/api/export", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      format: fmt,
-      q: state.q,
-      category: state.category,
-      kind: state.kind,
-      model: state.model,
-      since: computeSince(state.sincePreset),
-      status: state.status,
-    }),
-  });
-  const r = await res.json();
-  if (r.download_url) {
-    toast(`匯出完成（${r.count} 則）：${r.path}`);
-    window.open(withMediaKey(r.download_url), "_blank");
-  } else {
-    toast(`Obsidian Vault 匯出完成（${r.notes} 篇筆記）：${r.path}`);
-  }
-}
-
-document.getElementById("keyBtn").onclick = () => openAuthModal();
-document.getElementById("cancelKeyBtn").onclick = () => document.getElementById("authModal").classList.remove("open");
-document.getElementById("clearKeyBtn").onclick = () => {
-  localStorage.removeItem(KEY_STORAGE);
-  document.getElementById("apiKeyInput").value = "";
-  document.getElementById("authModal").classList.remove("open");
-  toast("已清除儲存的 API Key");
-};
-document.getElementById("saveKeyBtn").onclick = async () => {
-  const val = document.getElementById("apiKeyInput").value.trim();
-  if (val) localStorage.setItem(KEY_STORAGE, val);
-  else localStorage.removeItem(KEY_STORAGE);
-  document.getElementById("authModal").classList.remove("open");
-  await Promise.all([fetchStats(), loadBookmarks()]);
-};
-document.getElementById("apiKeyInput").addEventListener("keydown", e => {
-  if (e.key === "Enter") document.getElementById("saveKeyBtn").click();
-});
-
-document.getElementById("exportHtmlBtn").onclick = () => triggerExport("html");
-document.getElementById("exportObsBtn").onclick = () => triggerExport("obsidian");
-document.getElementById("lb").onclick = () => document.getElementById("lb").classList.remove("open");
-document.addEventListener("keydown", e => { if (e.key === "Escape") document.getElementById("lb").classList.remove("open"); });
-
-fetchStats();
-loadBookmarks();
-</script>
+    fetchStats();
+    loadBookmarks();
+  </script>
 </body>
+
 </html>

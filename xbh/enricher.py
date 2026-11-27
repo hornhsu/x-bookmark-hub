@@ -42,117 +42,151 @@ def fetch_fxtwitter(tweet_id: str, timeout: int = 15) -> tuple[str, dict | None]
         return "error", None
 
 
+def _fetch_with_retry(tid: str, delay: float) -> tuple[str, str, dict | None]:
+    """Fetch one tweet from FxTwitter with rate-limit backoff and polite pacing."""
+    status = "error"
+    tweet = None
+    for attempt in range(3):
+        status, tweet = fetch_fxtwitter(tid)
+        if status == "rate_limited":
+            time.sleep(2.5 * (attempt + 1))
+            continue
+        break
+    if delay > 0:
+        time.sleep(delay)
+    return tid, status, tweet
+
+
 def enrich_bookmarks(
     conn: sqlite3.Connection,
     since: str = "",
     limit: int = 100,
     only_missing_or_truncated: bool = True,
-    delay: float = 0.35,
-    progress_cb: Callable[[int, int, str], None] | None = None,
+    only_missing: bool = False,
+    delay: float = 0.25,
+    workers: int = 4,
+    progress_cb: Callable[[int, int, dict[str, int]], None] | None = None,
 ) -> dict[str, int]:
-    """Enrich empty or truncated bookmarks using FxTwitter API."""
-    where = ["enrich_status != 'unavailable'"]
+    """Enrich empty or truncated bookmarks using FxTwitter API.
+
+    Prioritizes empty-text shells first, then truncated posts, then other unenriched rows.
+    Pass limit=0 to process all matching rows.
+    """
+    where = ["enrich_status != 'unavailable'", "sync_status != 'unbookmarked'"]
     params: list = []
     if since:
         where.append("created_at >= ?")
         params.append(since)
-    if only_missing_or_truncated:
+    if only_missing:
+        where.append("(length(trim(text)) = 0 OR is_truncated = 1)")
+    elif only_missing_or_truncated:
         where.append("(length(trim(text)) = 0 OR is_truncated = 1 OR enriched_at = '')")
 
-    sql = f"SELECT tweet_id FROM bookmarks WHERE {' AND '.join(where)} ORDER BY created_at DESC LIMIT ?"
-    params.append(int(limit))
+    order_sql = (
+        "ORDER BY CASE "
+        "WHEN length(trim(text)) = 0 THEN 0 "
+        "WHEN is_truncated = 1 THEN 1 "
+        "ELSE 2 END ASC, created_at DESC"
+    )
+    limit_sql = ""
+    if limit and int(limit) > 0:
+        limit_sql = "LIMIT ?"
+        params.append(int(limit))
+
+    sql = f"SELECT tweet_id FROM bookmarks WHERE {' AND '.join(where)} {order_sql} {limit_sql}"
     rows = conn.execute(sql, params).fetchall()
     ids = [r[0] for r in rows]
 
     ok = 0
     unavailable = 0
     errors = 0
+    total = len(ids)
+    if total == 0:
+        return {"targeted": 0, "enriched": 0, "unavailable": 0, "errors": 0}
+
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    max_workers = max(1, int(workers))
+    chunk_size = 50
+    done = 0
 
-    for idx, tid in enumerate(ids, start=1):
-        status = "error"
-        tweet = None
-        for attempt in range(3):
-            status, tweet = fetch_fxtwitter(tid)
-            if status == "rate_limited":
-                time.sleep(2.5 * (attempt + 1))
-                continue
-            break
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        for start in range(0, total, chunk_size):
+            chunk = ids[start : start + chunk_size]
+            futs = [pool.submit(_fetch_with_retry, tid, delay) for tid in chunk]
+            for fut in as_completed(futs):
+                tid, status, tweet = fut.result()
+                done += 1
+                if status == "ok" and tweet:
+                    author = tweet.get("author") or {}
+                    media = tweet.get("media") or {}
+                    photos = [p.get("url") for p in (media.get("photos") or []) if p.get("url")]
+                    videos = media.get("videos") or []
+                    vid_thumbs = [v.get("thumbnail_url") for v in videos if v.get("thumbnail_url")]
+                    vid_urls = [v.get("url") for v in videos if v.get("url")]
+                    media_urls = photos + [u for u in vid_thumbs if u not in photos]
+                    quote = tweet.get("quote") or {}
+                    q_author = (quote.get("author") or {}).get("screen_name") or ""
+                    handle = author.get("screen_name") or ""
+                    if handle and not handle.startswith("@"):
+                        handle = f"@{handle}"
+                    if q_author and not q_author.startswith("@"):
+                        q_author = f"@{q_author}"
 
-        if status == "ok" and tweet:
-            author = tweet.get("author") or {}
-            media = tweet.get("media") or {}
-            photos = [p.get("url") for p in (media.get("photos") or []) if p.get("url")]
-            videos = media.get("videos") or []
-            vid_thumbs = [v.get("thumbnail_url") for v in videos if v.get("thumbnail_url")]
-            vid_urls = [v.get("url") for v in videos if v.get("url")]
-            media_urls = photos + [u for u in vid_thumbs if u not in photos]
-            quote = tweet.get("quote") or {}
-            q_author = (quote.get("author") or {}).get("screen_name") or ""
-            handle = author.get("screen_name") or ""
-            if handle and not handle.startswith("@"):
-                handle = f"@{handle}"
-            if q_author and not q_author.startswith("@"):
-                q_author = f"@{q_author}"
+                    conn.execute(
+                        """UPDATE bookmarks SET
+                            author_name = COALESCE(NULLIF(?, ''), author_name),
+                            author_handle = COALESCE(NULLIF(?, ''), author_handle),
+                            text = CASE WHEN length(?) > 0 THEN ? ELSE text END,
+                            quoted_text = COALESCE(NULLIF(?, ''), quoted_text),
+                            quoted_author = COALESCE(NULLIF(?, ''), quoted_author),
+                            media_urls = CASE WHEN ? != '[]' THEN ? ELSE media_urls END,
+                            video_urls = CASE WHEN ? != '[]' THEN ? ELSE video_urls END,
+                            has_video = MAX(has_video, ?),
+                            like_count = MAX(like_count, ?),
+                            retweet_count = MAX(retweet_count, ?),
+                            reply_count = MAX(reply_count, ?),
+                            view_count = MAX(view_count, ?),
+                            is_truncated = 0,
+                            enriched_at = ?,
+                            enrich_status = 'ok',
+                            updated_at = datetime('now')
+                        WHERE tweet_id = ?""",
+                        (
+                            author.get("name") or "",
+                            handle,
+                            tweet.get("text") or "",
+                            tweet.get("text") or "",
+                            quote.get("text") or "",
+                            q_author,
+                            json.dumps(media_urls, ensure_ascii=False),
+                            json.dumps(media_urls, ensure_ascii=False),
+                            json.dumps(vid_urls, ensure_ascii=False),
+                            json.dumps(vid_urls, ensure_ascii=False),
+                            1 if videos else 0,
+                            int(tweet.get("likes") or 0),
+                            int(tweet.get("retweets") or 0),
+                            int(tweet.get("replies") or 0),
+                            int(tweet.get("views") or 0),
+                            now_iso,
+                            tid,
+                        ),
+                    )
+                    ok += 1
+                elif status == "unavailable":
+                    conn.execute(
+                        "UPDATE bookmarks SET enrich_status = 'unavailable', enriched_at = ?, updated_at = datetime('now') WHERE tweet_id = ?",
+                        (now_iso, tid),
+                    )
+                    unavailable += 1
+                else:
+                    errors += 1
 
-            conn.execute(
-                """UPDATE bookmarks SET
-                    author_name = COALESCE(NULLIF(?, ''), author_name),
-                    author_handle = COALESCE(NULLIF(?, ''), author_handle),
-                    text = CASE WHEN length(?) > 0 THEN ? ELSE text END,
-                    quoted_text = COALESCE(NULLIF(?, ''), quoted_text),
-                    quoted_author = COALESCE(NULLIF(?, ''), quoted_author),
-                    media_urls = CASE WHEN ? != '[]' THEN ? ELSE media_urls END,
-                    video_urls = CASE WHEN ? != '[]' THEN ? ELSE video_urls END,
-                    has_video = MAX(has_video, ?),
-                    like_count = MAX(like_count, ?),
-                    retweet_count = MAX(retweet_count, ?),
-                    reply_count = MAX(reply_count, ?),
-                    view_count = MAX(view_count, ?),
-                    is_truncated = 0,
-                    enriched_at = ?,
-                    enrich_status = 'ok',
-                    updated_at = datetime('now')
-                WHERE tweet_id = ?""",
-                (
-                    author.get("name") or "",
-                    handle,
-                    tweet.get("text") or "",
-                    tweet.get("text") or "",
-                    quote.get("text") or "",
-                    q_author,
-                    json.dumps(media_urls, ensure_ascii=False),
-                    json.dumps(media_urls, ensure_ascii=False),
-                    json.dumps(vid_urls, ensure_ascii=False),
-                    json.dumps(vid_urls, ensure_ascii=False),
-                    1 if videos else 0,
-                    int(tweet.get("likes") or 0),
-                    int(tweet.get("retweets") or 0),
-                    int(tweet.get("replies") or 0),
-                    int(tweet.get("views") or 0),
-                    now_iso,
-                    tid,
-                ),
-            )
-            ok += 1
-        elif status == "unavailable":
-            conn.execute(
-                "UPDATE bookmarks SET enrich_status = 'unavailable', enriched_at = ?, updated_at = datetime('now') WHERE tweet_id = ?",
-                (now_iso, tid),
-            )
-            unavailable += 1
-        else:
-            errors += 1
+                if progress_cb:
+                    progress_cb(done, total, {"enriched": ok, "unavailable": unavailable, "errors": errors})
 
-        if idx % 20 == 0:
             conn.commit()
-        if progress_cb:
-            progress_cb(idx, len(ids), tid)
-        if delay > 0 and idx < len(ids):
-            time.sleep(delay)
 
-    conn.commit()
-    return {"targeted": len(ids), "enriched": ok, "unavailable": unavailable, "errors": errors}
+    return {"targeted": total, "enriched": ok, "unavailable": unavailable, "errors": errors}
 
 
 def _infer_ext(url: str, content_type: str = "") -> str:
@@ -199,53 +233,74 @@ def cache_media(
     since: str = "",
     limit: int = 300,
     max_workers: int = 10,
+    progress_cb: Callable[[int, int, dict[str, int]], None] | None = None,
 ) -> dict[str, int]:
-    """Download media_urls into media_dir and persist relative media/<file> paths."""
+    """Download media_urls into media_dir and persist relative media/<file> paths.
+
+    Pass limit=0 to process all matching rows.
+    """
     media_dir.mkdir(parents=True, exist_ok=True)
-    where = ["media_urls != '[]'", "local_media = '[]'"]
+    where = ["media_urls != '[]'", "local_media = '[]'", "sync_status != 'unbookmarked'"]
     params: list = []
     if since:
         where.append("created_at >= ?")
         params.append(since)
 
+    limit_sql = ""
+    if limit and int(limit) > 0:
+        limit_sql = "LIMIT ?"
+        params.append(int(limit))
+
     rows = conn.execute(
-        f"SELECT tweet_id, media_urls FROM bookmarks WHERE {' AND '.join(where)} ORDER BY created_at DESC LIMIT ?",
-        [*params, int(limit)],
+        f"SELECT tweet_id, media_urls FROM bookmarks WHERE {' AND '.join(where)} ORDER BY created_at DESC {limit_sql}",
+        params,
     ).fetchall()
 
-    jobs = []
-    results_map: dict[str, list[str | None]] = {}
-    for r in rows:
-        tid = r["tweet_id"]
-        urls = _json_list(r["media_urls"])
-        results_map[tid] = [None] * len(urls)
-        for idx, u in enumerate(urls):
-            jobs.append((tid, idx, u))
+    total_rows = len(rows)
+    if total_rows == 0:
+        return {"targeted_tweets": 0, "updated_tweets": 0, "images_cached": 0, "images_failed": 0}
 
     downloaded = 0
     failed = 0
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futs = [pool.submit(_download_one, media_dir, tid, idx, u) for tid, idx, u in jobs]
-        for fut in as_completed(futs):
-            tid, idx, rel = fut.result()
-            if rel:
-                results_map[tid][idx] = rel
-                downloaded += 1
-            else:
-                failed += 1
-
     updated_rows = 0
-    for tid, paths in results_map.items():
-        clean = [p for p in paths if p]
-        if clean:
-            conn.execute(
-                "UPDATE bookmarks SET local_media = ?, updated_at = datetime('now') WHERE tweet_id = ?",
-                (json.dumps(clean, ensure_ascii=False), tid),
-            )
-            updated_rows += 1
-    conn.commit()
+    chunk_size = 100
+
+    with ThreadPoolExecutor(max_workers=max(1, int(max_workers))) as pool:
+        for start in range(0, total_rows, chunk_size):
+            chunk = rows[start : start + chunk_size]
+            jobs = []
+            results_map: dict[str, list[str | None]] = {}
+            for r in chunk:
+                tid = r["tweet_id"]
+                urls = _json_list(r["media_urls"])
+                results_map[tid] = [None] * len(urls)
+                for idx, u in enumerate(urls):
+                    jobs.append((tid, idx, u))
+
+            futs = [pool.submit(_download_one, media_dir, tid, idx, u) for tid, idx, u in jobs]
+            for fut in as_completed(futs):
+                tid, idx, rel = fut.result()
+                if rel:
+                    results_map[tid][idx] = rel
+                    downloaded += 1
+                else:
+                    failed += 1
+
+            for tid, paths in results_map.items():
+                clean = [p for p in paths if p]
+                if clean:
+                    conn.execute(
+                        "UPDATE bookmarks SET local_media = ?, updated_at = datetime('now') WHERE tweet_id = ?",
+                        (json.dumps(clean, ensure_ascii=False), tid),
+                    )
+                    updated_rows += 1
+            conn.commit()
+            if progress_cb:
+                done = min(start + len(chunk), total_rows)
+                progress_cb(done, total_rows, {"updated_tweets": updated_rows, "images_cached": downloaded, "images_failed": failed})
+
     return {
-        "targeted_tweets": len(rows),
+        "targeted_tweets": total_rows,
         "updated_tweets": updated_rows,
         "images_cached": downloaded,
         "images_failed": failed,
